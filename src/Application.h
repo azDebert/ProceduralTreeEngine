@@ -4,7 +4,17 @@
 #include <GLFW/glfw3.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
+
+// Holds the queue family indices supported by GPU
+struct QueueFamilyIndices {
+    std::optional<uint32_t> graphicsFamily;
+
+    bool isComplete() const {
+        return graphicsFamily.has_value();
+    }
+};
 
 class Application {
 public:
@@ -22,6 +32,11 @@ private:
     void createInstance();
     bool checkValidationLayerSupport() const;
 
+    void pickPhysicalDevice();
+    bool isDeviceSuitable(VkPhysicalDevice device) const;
+    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
+    void createLogicalDevice();
+
     void mainLoop();
     void cleanup();
 
@@ -31,4 +46,8 @@ private:
 
     GLFWwindow* m_window = nullptr;
     VkInstance m_instance = VK_NULL_HANDLE;
+
+    VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
+    VkDevice m_device = VK_NULL_HANDLE;
+    VkQueue m_graphicsQueue = VK_NULL_HANDLE;
 };

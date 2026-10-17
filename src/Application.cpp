@@ -62,6 +62,8 @@ void Application::initWindow() {
 
 void Application::initVulkan() {
 	createInstance();
+    pickPhysicalDevice();
+    createLogicalDevice();
 }
 
 void Application::createInstance() {
@@ -138,6 +140,103 @@ bool Application::checkValidationLayerSupport() const {
     return true;
 }
 
+void Application::pickPhysicalDevice() {
+    uint32_t deviceCount = 0;
+    vkEnumeratePhysicalDevices(m_instance, &deviceCount, nullptr);
+
+    if (deviceCount == 0) {
+        throw std::runtime_error("Failed to find any GPUs with Vulkan support!");
+    }
+
+    std::vector<VkPhysicalDevice> devices(deviceCount);
+    vkEnumeratePhysicalDevices(m_instance, &deviceCount, devices.data());
+
+    // Prefer a dedicated (discrete) GPU like the RTX 5070 Ti over integrated graphics
+    for (const auto& device : devices) {
+        VkPhysicalDeviceProperties props{};
+        vkGetPhysicalDeviceProperties(device, &props);
+
+        if (isDeviceSuitable(device) && props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+            m_physicalDevice = device;
+            std::cout << "Selected Discrete GPU: " << props.deviceName << '\n';
+            break;
+        }
+    }
+
+    // Fallback to any suitable GPU if no discrete card was found
+    if (m_physicalDevice == VK_NULL_HANDLE) {
+        for (const auto& device : devices) {
+            if (isDeviceSuitable(device)) {
+                VkPhysicalDeviceProperties props{};
+                vkGetPhysicalDeviceProperties(device, &props);
+                m_physicalDevice = device;
+                std::cout << "Selected Fallback GPU: " << props.deviceName << '\n';
+                break;
+            }
+        }
+    }
+
+    if (m_physicalDevice == VK_NULL_HANDLE) {
+        throw std::runtime_error("Failed to find a suitable GPU!");
+    }
+}
+
+bool Application::isDeviceSuitable(VkPhysicalDevice device) const {
+    QueueFamilyIndices indices = findQueueFamilies(device);
+    return indices.isComplete();
+}
+
+QueueFamilyIndices Application::findQueueFamilies(VkPhysicalDevice device) const {
+    QueueFamilyIndices indices;
+
+    uint32_t queueFamilyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+    // Look for a queue family that supports graphics commands
+    for (uint32_t i = 0; i < queueFamilyCount; ++i) {
+        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            indices.graphicsFamily = i;
+            break;
+        }
+    }
+
+    return indices;
+}
+
+void Application::createLogicalDevice() {
+    QueueFamilyIndices indices = findQueueFamilies(m_physicalDevice);
+
+    // Request 1 queue from the graphics queue family
+    VkDeviceQueueCreateInfo queueCreateInfo{};
+    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+    queueCreateInfo.queueCount = 1;
+
+    float queuePriority = 1.0f; // Priority between 0.0 and 1.0
+    queueCreateInfo.pQueuePriorities = &queuePriority;
+
+    // Hardware features we want (none needed for now)
+    VkPhysicalDeviceFeatures deviceFeatures{};
+
+    VkDeviceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pQueueCreateInfos = &queueCreateInfo;
+    createInfo.queueCreateInfoCount = 1;
+    createInfo.pEnabledFeatures = &deviceFeatures;
+
+    if (vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create logical device!");
+    }
+
+    // Grab the handle to the created graphics queue (index 0)
+    vkGetDeviceQueue(m_device, indices.graphicsFamily.value(), 0, &m_graphicsQueue);
+    std::cout << "Logical device and graphics queue created (Queue Family Index: "
+        << indices.graphicsFamily.value() << ").\n";
+}
+
 void Application::mainLoop() {
     while (!glfwWindowShouldClose(m_window)) {
         glfwPollEvents();
@@ -149,7 +248,12 @@ void Application::mainLoop() {
 }
 
 void Application::cleanup() {
-    // Destroy Vulkan objects in the reverse order of creation
+	// Destroy the logical device before instance
+    if (m_device != VK_NULL_HANDLE) {
+        vkDestroyDevice(m_device, nullptr);
+        m_device = VK_NULL_HANDLE;
+    }
+
     if (m_instance != VK_NULL_HANDLE) {
         vkDestroyInstance(m_instance, nullptr);
         m_instance = VK_NULL_HANDLE;
