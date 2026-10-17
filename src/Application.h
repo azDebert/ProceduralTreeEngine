@@ -58,6 +58,16 @@ private:
     VkShaderModule createShaderModule(const std::vector<char>& code) const;
     static std::vector<char> readFile(const std::string& filename);
 
+    void createFramebuffers();
+    void createCommandPool();
+    void createCommandBuffers();
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) const;
+    void createSyncObjects();
+    void drawFrame();
+    void recreateSwapChain();
+    void cleanupSwapChain();
+    static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
+
     void mainLoop();
     void cleanup();
 
@@ -84,4 +94,14 @@ private:
     VkRenderPass m_renderPass = VK_NULL_HANDLE;
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
+
+    std::vector<VkFramebuffer> m_swapChainFramebuffers;
+    VkCommandPool m_commandPool = VK_NULL_HANDLE;
+    std::vector<VkCommandBuffer> m_commandBuffers;
+
+    std::vector<VkSemaphore> m_imageAvailableSemaphores;
+    std::vector<VkSemaphore> m_renderFinishedSemaphores;
+    std::vector<VkFence> m_inFlightFences;
+    uint32_t m_currentFrame = 0;
+    bool m_framebufferResized = false;
 };
