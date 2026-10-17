@@ -11,7 +11,6 @@ public:
     Application(uint32_t width, uint32_t height, const std::string& title);
     ~Application();
 
-    // Prevent accidental copying of the Application and its underlying window handle
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
 
@@ -19,6 +18,10 @@ public:
 
 private:
     void initWindow();
+    void initVulkan();
+    void createInstance();
+    bool checkValidationLayerSupport() const;
+
     void mainLoop();
     void cleanup();
 
@@ -26,6 +29,6 @@ private:
     uint32_t m_height;
     std::string m_title;
 
-    // Pointer to the GLFW window object created on the heap
     GLFWwindow* m_window = nullptr;
+    VkInstance m_instance = VK_NULL_HANDLE;
 };
