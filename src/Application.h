@@ -53,6 +53,11 @@ private:
     void createSwapChain();
     void createImageViews();
 
+    void createRenderPass();
+    void createGraphicsPipeline();
+    VkShaderModule createShaderModule(const std::vector<char>& code) const;
+    static std::vector<char> readFile(const std::string& filename);
+
     void mainLoop();
     void cleanup();
 
@@ -75,4 +80,8 @@ private:
     VkFormat m_swapChainImageFormat = VK_FORMAT_UNDEFINED;
     VkExtent2D m_swapChainExtent{};
     std::vector<VkImageView> m_swapChainImageViews;
+
+    VkRenderPass m_renderPass = VK_NULL_HANDLE;
+    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
+    VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
 };

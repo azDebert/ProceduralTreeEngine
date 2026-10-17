@@ -38,3 +38,31 @@ target_link_libraries(TreeEngine PRIVATE
     glfw
     Vulkan::Vulkan
 )
+
+# Automatically compile GLSL shaders into SPIR-V (.spv)
+find_program(GLSLC_EXECUTABLE NAMES glslc HINTS Vulkan::glslc REQUIRED)
+
+set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+set(SHADER_FILES
+    "${SHADER_SOURCE_DIR}/triangle.vert"
+    "${SHADER_SOURCE_DIR}/triangle.frag"
+)
+
+foreach(SHADER ${SHADER_FILES})
+    get_filename_component(FILE_NAME ${SHADER} NAME)
+    set(SPV_FILE "${CMAKE_CURRENT_BINARY_DIR}/shaders/${FILE_NAME}.spv")
+
+    add_custom_command(
+        OUTPUT ${SPV_FILE}
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:TreeEngine>/shaders"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/shaders"
+        COMMAND ${GLSLC_EXECUTABLE} ${SHADER} -o ${SPV_FILE}
+        COMMAND ${CMAKE_COMMAND} -E copy ${SPV_FILE} "$<TARGET_FILE_DIR:TreeEngine>/shaders/${FILE_NAME}.spv"
+        DEPENDS ${SHADER}
+        COMMENT "Compiling shader ${FILE_NAME} to SPIR-V"
+    )
+    list(APPEND SPV_SHADERS ${SPV_FILE})
+endforeach()
+
+add_custom_target(Shaders ALL DEPENDS ${SPV_SHADERS})
+add_dependencies(TreeEngine Shaders)
