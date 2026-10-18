@@ -10,7 +10,7 @@ struct TreeParameters {
     uint32_t seed = 42;
     float trunkHeight = 2.0f;
     float trunkRadius = 0.25f;
-    int recursionDepth = 3;       // How many levels of child branches
+    int recursionDepth = 5;       // How many levels of child branches
     float branchAngle = 35.0f;    // Angle at which branches split off
     float lengthShrink = 0.7f;    // How much shorter child branches are
     float radiusShrink = 0.6f;    // How much thinner child branches are
@@ -65,17 +65,20 @@ private:
         float endRadius = radius * m_params.radiusShrink;
         m_segments.push_back({ start, end, radius, endRadius });
 
-        // Generate 2 or 3 child branches splitting off near the end of this segment
-        int childCount = (depth > 2) ? 3 : 2;
-        float splitFraction = 0.8f; // Split occurs 80% up the branch
-        glm::vec3 splitPoint = start + (end - start) * splitFraction;
+        if (depth == 1) return;
+
+        int childCount = (depth >= 4) ? 3 : 2;
+        glm::vec3 splitPoint = end; // Branches grow continuously from the tip of the parent segment
 
         std::uniform_real_distribution<float> rotDist(0.0f, 2.0f * glm::pi<float>());
-        std::uniform_real_distribution<float> lengthDist(0.75f, 0.95f);
+        std::uniform_real_distribution<float> lengthDist(0.80f, 0.95f);
+        std::uniform_real_distribution<float> pitchJitter(-6.0f, 6.0f);
 
         for (int i = 0; i < childCount; ++i) {
-            float angleRot = rotDist(rng);
-            float pitch = glm::radians(m_params.branchAngle);
+            // Space child branches evenly around the circle with slight organic variation
+            float baseAngle = (static_cast<float>(i) / static_cast<float>(childCount)) * 2.0f * glm::pi<float>();
+            float angleRot = baseAngle + rotDist(rng) * 0.25f;
+            float pitch = glm::radians(m_params.branchAngle + pitchJitter(rng));
 
             // Compute a vector perpendicular to the branch direction (check length before normalising)
             glm::vec3 rawPerp = glm::cross(direction, glm::vec3(0.0f, 1.0f, 0.0f));

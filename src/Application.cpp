@@ -14,13 +14,13 @@ namespace {
     // Allow CPU to work on 2 frames ahead of the GPU
     constexpr int kMaxFramesInFlight = 2;
 
-    // Helper function to build a combined Vertex and Index buffer from a TreeModel
-    std::pair<std::vector<Vertex>, std::vector<uint16_t>> generateTreeMesh(const TreeModel& tree) {
+    // Helper function to build a combined Vertex and 32-bit Index buffer from a TreeModel
+    std::pair<std::vector<Vertex>, std::vector<uint32_t>> generateTreeMesh(const TreeModel& tree) {
         std::vector<Vertex> allVertices;
-        std::vector<uint16_t> allIndices;
+        std::vector<uint32_t> allIndices;
 
         const auto& segments = tree.getSegments();
-        int radialSegments = 10;
+        int radialSegments = 12;
 
         for (const auto& seg : segments) {
             glm::vec3 dir = seg.end - seg.start;
@@ -28,7 +28,7 @@ namespace {
             if (length < 0.0001f) continue;
             dir = glm::normalize(dir);
 
-            // Find perpendicular vectors for the radial ring (check length before normalising to avoid NaN)
+            // Find perpendicular vectors for the radial ring (check length BEFORE normalising to avoid NaN)
             glm::vec3 rawPerp = glm::cross(dir, glm::vec3(0.0f, 1.0f, 0.0f));
             if (glm::length(rawPerp) < 0.001f) {
                 rawPerp = glm::cross(dir, glm::vec3(1.0f, 0.0f, 0.0f));
@@ -36,7 +36,7 @@ namespace {
             glm::vec3 perp1 = glm::normalize(rawPerp);
             glm::vec3 perp2 = glm::normalize(glm::cross(dir, perp1));
 
-            uint16_t baseIndex = static_cast<uint16_t>(allVertices.size());
+            uint32_t baseIndex = static_cast<uint32_t>(allVertices.size());
 
             // Generate start and end rings
             for (int i = 0; i <= radialSegments; ++i) {
@@ -44,27 +44,30 @@ namespace {
                 float c = std::cos(theta);
                 float s = std::sin(theta);
 
-                glm::vec3 offset = (perp1 * c + perp2 * s);
+                // Outward unit normal vector around the cylinder circumference
+                glm::vec3 normal = glm::normalize(perp1 * c + perp2 * s);
 
-                // Start ring vertex (Thicker, darker bark)
+                // Start ring vertex (Thicker, darker bark + outward surface normal)
                 allVertices.push_back({
-                    seg.start + offset * seg.startRadius,
-                    { 0.32f, 0.20f, 0.10f }
+                    seg.start + normal * seg.startRadius,
+                    { 0.42f, 0.27f, 0.14f },
+                    normal
                     });
 
-                // End ring vertex (Thinner bark)
+                // End ring vertex (Thinner bark + outward surface normal)
                 allVertices.push_back({
-                    seg.end + offset * seg.endRadius,
-                    { 0.42f, 0.28f, 0.15f }
+                    seg.end + normal * seg.endRadius,
+                    { 0.50f, 0.34f, 0.18f },
+                    normal
                     });
             }
 
             // Generate quad indices for this branch segment
             for (int i = 0; i < radialSegments; ++i) {
-                uint16_t start1 = baseIndex + static_cast<uint16_t>(i * 2);
-                uint16_t end1 = baseIndex + static_cast<uint16_t>(i * 2 + 1);
-                uint16_t start2 = baseIndex + static_cast<uint16_t>((i + 1) * 2);
-                uint16_t end2 = baseIndex + static_cast<uint16_t>((i + 1) * 2 + 1);
+                uint32_t start1 = baseIndex + static_cast<uint32_t>(i * 2);
+                uint32_t end1 = baseIndex + static_cast<uint32_t>(i * 2 + 1);
+                uint32_t start2 = baseIndex + static_cast<uint32_t>((i + 1) * 2);
+                uint32_t end2 = baseIndex + static_cast<uint32_t>((i + 1) * 2 + 1);
 
                 // Triangle 1
                 allIndices.push_back(start1);
@@ -1090,10 +1093,10 @@ void Application::updateUniformBuffer(uint32_t currentImage) {
         glm::vec3(0.0f, 0.0f, 1.0f)
     );
 
-    // View matrix: position the camera at (0.0f, -6.0f, 1.0f) looking at the tree midpoint (0.0f, 0.0f, 0.8f)
+    // View matrix: position the camera at (0.0f, -8.0f, 1.8f) looking at the tree centre (0.0f, 0.0f, 1.5f)
     ubo.view = glm::lookAt(
-        glm::vec3(0.0f, -6.0f, 1.0f),
-        glm::vec3(0.0f, 0.0f, 0.8f),
+        glm::vec3(0.0f, -8.0f, 1.8f),
+        glm::vec3(0.0f, 0.0f, 1.5f),
         glm::vec3(0.0f, 0.0f, 1.0f)
     );
 
@@ -1254,8 +1257,8 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-    // Bind the 16-bit index buffer and draw the indexed triangles
-    vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+    // Bind the 32-bit index buffer and draw the indexed triangles
+    vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
     vkCmdBindDescriptorSets(
         commandBuffer,

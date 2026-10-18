@@ -20,6 +20,7 @@
 struct Vertex {
     glm::vec3 pos;
     glm::vec3 color;
+    glm::vec3 normal;
 
     // Describes the byte stride between consecutive vertices in the buffer
     static VkVertexInputBindingDescription getBindingDescription() {
@@ -31,20 +32,26 @@ struct Vertex {
     }
 
     // Describes how individual vertex variables map to shader layout locations
-    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
 
-        // Location 0 - pos (vec3 = three 32-bit floats)
+        // Location 0: pos (vec3 = three 32-bit floats)
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
         attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[0].offset = offsetof(Vertex, pos);
 
-        // Location 1 - color (vec3 = three 32-bit floats)
+        // Location 1: color (vec3 = three 32-bit floats)
         attributeDescriptions[1].binding = 0;
         attributeDescriptions[1].location = 1;
         attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+        // Location 2: normal (vec3 = three 32-bit floats)
+        attributeDescriptions[2].binding = 0;
+        attributeDescriptions[2].location = 2;
+        attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[2].offset = offsetof(Vertex, normal);
 
         return attributeDescriptions;
     }
