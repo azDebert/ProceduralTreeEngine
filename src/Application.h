@@ -98,6 +98,15 @@ private:
     void createFramebuffers();
     void createCommandPool();
     void createVertexBuffer();
+    void createIndexBuffer();
+    void createBuffer(
+        VkDeviceSize size,
+        VkBufferUsageFlags usage,
+        VkMemoryPropertyFlags properties,
+        VkBuffer& buffer,
+        VkDeviceMemory& bufferMemory
+    ) const;
+    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const;
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
     void createCommandBuffers();
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) const;
@@ -138,6 +147,8 @@ private:
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     VkBuffer m_vertexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory m_vertexBufferMemory = VK_NULL_HANDLE;
+    VkBuffer m_indexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_indexBufferMemory = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> m_commandBuffers;
 
     std::vector<VkSemaphore> m_imageAvailableSemaphores;

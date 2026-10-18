@@ -13,11 +13,18 @@ namespace {
     // Allow CPU to work on 2 frames ahead of the GPU
     constexpr int kMaxFramesInFlight = 2;
 
-    // CPU-side vertex data uploaded to the GPU vertex buffer
+    // 4 unique corners of a rectangle
     const std::vector<Vertex> kVertices = {
-        { { 0.0f, -0.5f },{ 1.0f, 0.8f, 0.1f } }, // Top corner (Gold)
-        { { 0.5f,  0.5f },{ 0.1f, 0.9f, 0.4f } }, // Bottom right corner (Green)
-        { { -0.5f,  0.5f },{ 0.6f, 0.2f, 1.0f } }  // Bottom left corner (Violet)
+        { { -0.5f, -0.5f },{ 1.0f, 0.8f, 0.1f } }, // 0: Top left (Gold)
+        { { 0.5f, -0.5f },{ 0.1f, 0.9f, 0.4f } }, // 1: Top right (Green)
+        { { 0.5f,  0.5f },{ 0.6f, 0.2f, 1.0f } }, // 2: Bottom right (Violet)
+        { { -0.5f,  0.5f },{ 0.1f, 0.7f, 1.0f } }  // 3: Bottom left (Blue)
+    };
+
+    // 6 indices forming 2 clockwise triangles (0-1-2 and 2-3-0)
+    const std::vector<uint16_t> kIndices = {
+        0, 1, 2,
+        2, 3, 0
     };
 
     // Validation layer used for catching Vulkan bugs
@@ -95,6 +102,7 @@ void Application::initVulkan() {
     createFramebuffers();
     createCommandPool();
     createVertexBuffer();
+    createIndexBuffer();
     createCommandBuffers();
     createSyncObjects();
 }
@@ -697,43 +705,154 @@ void Application::createCommandPool() {
 }
 
 void Application::createVertexBuffer() {
+    VkDeviceSize bufferSize = sizeof(kVertices[0]) * kVertices.size();
+
+    // 1. Create a CPU-visible staging buffer as the transfer source
+    VkBuffer stagingBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory stagingBufferMemory = VK_NULL_HANDLE;
+    createBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        stagingBuffer,
+        stagingBufferMemory
+    );
+
+    // 2. Map memory and copy vertex data into the staging buffer
+    void* data = nullptr;
+    vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+    std::memcpy(data, kVertices.data(), static_cast<size_t>(bufferSize));
+    vkUnmapMemory(m_device, stagingBufferMemory);
+
+    // 3. Create the actual vertex buffer in fast GPU-local VRAM
+    createBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        m_vertexBuffer,
+        m_vertexBufferMemory
+    );
+
+    // 4. Copy from staging buffer to device-local vertex buffer on the GPU
+    copyBuffer(stagingBuffer, m_vertexBuffer, bufferSize);
+
+    // 5. Clean up the temporary staging buffer
+    vkDestroyBuffer(m_device, stagingBuffer, nullptr);
+    vkFreeMemory(m_device, stagingBufferMemory, nullptr);
+
+    std::cout << "Device-local vertex buffer created (" << kVertices.size() << " vertices, "
+        << bufferSize << " bytes).\n";
+}
+
+void Application::createIndexBuffer() {
+    VkDeviceSize bufferSize = sizeof(kIndices[0]) * kIndices.size();
+
+    // 1. Create a CPU-visible staging buffer
+    VkBuffer stagingBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory stagingBufferMemory = VK_NULL_HANDLE;
+    createBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        stagingBuffer,
+        stagingBufferMemory
+    );
+
+    // 2. Copy index data into the staging buffer
+    void* data = nullptr;
+    vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+    std::memcpy(data, kIndices.data(), static_cast<size_t>(bufferSize));
+    vkUnmapMemory(m_device, stagingBufferMemory);
+
+    // 3. Create the index buffer in fast GPU-local VRAM
+    createBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        m_indexBuffer,
+        m_indexBufferMemory
+    );
+
+    // 4. Copy from staging buffer to device-local index buffer
+    copyBuffer(stagingBuffer, m_indexBuffer, bufferSize);
+
+    // 5. Clean up the temporary staging buffer
+    vkDestroyBuffer(m_device, stagingBuffer, nullptr);
+    vkFreeMemory(m_device, stagingBufferMemory, nullptr);
+
+    std::cout << "Device-local index buffer created (" << kIndices.size() << " indices, "
+        << bufferSize << " bytes).\n";
+}
+
+void Application::createBuffer(
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags properties,
+    VkBuffer& buffer,
+    VkDeviceMemory& bufferMemory
+) const {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = sizeof(kVertices[0]) * kVertices.size();
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_vertexBuffer) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create vertex buffer!");
+    if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create buffer!");
     }
 
-    // Query how much memory the buffer needs and which memory types are compatible
     VkMemoryRequirements memRequirements{};
-    vkGetBufferMemoryRequirements(m_device, m_vertexBuffer, &memRequirements);
+    vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
 
     VkMemoryAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = findMemoryType(
-        memRequirements.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    );
+    allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
 
-    if (vkAllocateMemory(m_device, &allocInfo, nullptr, &m_vertexBufferMemory) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate vertex buffer memory!");
+    if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate buffer memory!");
     }
 
-    // Associate the allocated memory block with the vertex buffer handle
-    vkBindBufferMemory(m_device, m_vertexBuffer, m_vertexBufferMemory, 0);
+    vkBindBufferMemory(m_device, buffer, bufferMemory, 0);
+}
 
-    // Map the GPU memory into CPU address space, copy the vertices, and unmap
-    void* data = nullptr;
-    vkMapMemory(m_device, m_vertexBufferMemory, 0, bufferInfo.size, 0, &data);
-    std::memcpy(data, kVertices.data(), static_cast<size_t>(bufferInfo.size));
-    vkUnmapMemory(m_device, m_vertexBufferMemory);
+void Application::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const {
+    // Allocate a temporary one time command buffer from the command pool
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = m_commandPool;
+    allocInfo.commandBufferCount = 1;
 
-    std::cout << "Vertex buffer created and populated (" << kVertices.size() << " vertices, "
-        << bufferInfo.size << " bytes).\n";
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
+
+    // Begin recording a one time submit command buffer
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = size;
+    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+    vkEndCommandBuffer(commandBuffer);
+
+    // Submit the copy command to the graphics queue and wait for it to finish
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(m_graphicsQueue);
+
+    // Free the temporary command buffer
+    vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
 }
 
 uint32_t Application::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const {
@@ -809,8 +928,9 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-    // Draw the vertices stored in the buffer, 1 instance
-    vkCmdDraw(commandBuffer, static_cast<uint32_t>(kVertices.size()), 1, 0, 0);
+    // Bind the 16-bit index buffer and draw the indexed triangles
+    vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(kIndices.size()), 1, 0, 0, 0);
 
     vkCmdEndRenderPass(commandBuffer);
 
@@ -974,6 +1094,16 @@ void Application::mainLoop() {
 
 void Application::cleanup() {
     cleanupSwapChain();
+
+    if (m_indexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(m_device, m_indexBuffer, nullptr);
+        m_indexBuffer = VK_NULL_HANDLE;
+    }
+
+    if (m_indexBufferMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(m_device, m_indexBufferMemory, nullptr);
+        m_indexBufferMemory = VK_NULL_HANDLE;
+    }
 
     if (m_vertexBuffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
