@@ -14,26 +14,77 @@ namespace {
     // Allow CPU to work on 2 frames ahead of the GPU
     constexpr int kMaxFramesInFlight = 2;
 
-    // Two stacked 3D squares: one at Z = 0.0f (top) and one at Z = -0.5f (bottom)
-    const std::vector<Vertex> kVertices = {
-        // Upper square (Z = 0.0f)
-        { { -0.5f, -0.5f,  0.0f },{ 1.0f, 0.8f, 0.1f } }, // 0: Top-left (Gold)
-        { { 0.5f, -0.5f,  0.0f },{ 0.1f, 0.9f, 0.4f } }, // 1: Top-right (Green)
-        { { 0.5f,  0.5f,  0.0f },{ 0.6f, 0.2f, 1.0f } }, // 2: Bottom-right (Violet)
-        { { -0.5f,  0.5f,  0.0f },{ 0.1f, 0.7f, 1.0f } }, // 3: Bottom-left (Blue)
+    // Helper function to build a combined Vertex and Index buffer from a TreeModel
+    std::pair<std::vector<Vertex>, std::vector<uint16_t>> generateTreeMesh(const TreeModel& tree) {
+        std::vector<Vertex> allVertices;
+        std::vector<uint16_t> allIndices;
 
-        // Lower square (Z = -0.5f)
-        { { -0.5f, -0.5f, -0.5f },{ 0.9f, 0.2f, 0.2f } }, // 4: Top-left (Crimson)
-        { { 0.5f, -0.5f, -0.5f },{ 0.9f, 0.5f, 0.1f } }, // 5: Top-right (Amber)
-        { { 0.5f,  0.5f, -0.5f },{ 0.2f, 0.8f, 0.7f } }, // 6: Bottom-right (Teal)
-        { { -0.5f,  0.5f, -0.5f },{ 0.8f, 0.8f, 0.9f } }  // 7: Bottom-left (Silver)
-    };
+        const auto& segments = tree.getSegments();
+        int radialSegments = 10;
 
-    // 12 indices forming 4 triangles (2 for the upper square, 2 for the lower square)
-    const std::vector<uint16_t> kIndices = {
-        0, 1, 2, 2, 3, 0, // Upper square
-        4, 5, 6, 6, 7, 4  // Lower square (drawn second to test depth occlusion)
-    };
+        for (const auto& seg : segments) {
+            glm::vec3 dir = seg.end - seg.start;
+            float length = glm::length(dir);
+            if (length < 0.0001f) continue;
+            dir = glm::normalize(dir);
+
+            // Find perpendicular vectors for the radial ring (check length before normalising to avoid NaN)
+            glm::vec3 rawPerp = glm::cross(dir, glm::vec3(0.0f, 1.0f, 0.0f));
+            if (glm::length(rawPerp) < 0.001f) {
+                rawPerp = glm::cross(dir, glm::vec3(1.0f, 0.0f, 0.0f));
+            }
+            glm::vec3 perp1 = glm::normalize(rawPerp);
+            glm::vec3 perp2 = glm::normalize(glm::cross(dir, perp1));
+
+            uint16_t baseIndex = static_cast<uint16_t>(allVertices.size());
+
+            // Generate start and end rings
+            for (int i = 0; i <= radialSegments; ++i) {
+                float theta = static_cast<float>(i) / static_cast<float>(radialSegments) * 2.0f * glm::pi<float>();
+                float c = std::cos(theta);
+                float s = std::sin(theta);
+
+                glm::vec3 offset = (perp1 * c + perp2 * s);
+
+                // Start ring vertex (Thicker, darker bark)
+                allVertices.push_back({
+                    seg.start + offset * seg.startRadius,
+                    { 0.32f, 0.20f, 0.10f }
+                    });
+
+                // End ring vertex (Thinner bark)
+                allVertices.push_back({
+                    seg.end + offset * seg.endRadius,
+                    { 0.42f, 0.28f, 0.15f }
+                    });
+            }
+
+            // Generate quad indices for this branch segment
+            for (int i = 0; i < radialSegments; ++i) {
+                uint16_t start1 = baseIndex + static_cast<uint16_t>(i * 2);
+                uint16_t end1 = baseIndex + static_cast<uint16_t>(i * 2 + 1);
+                uint16_t start2 = baseIndex + static_cast<uint16_t>((i + 1) * 2);
+                uint16_t end2 = baseIndex + static_cast<uint16_t>((i + 1) * 2 + 1);
+
+                // Triangle 1
+                allIndices.push_back(start1);
+                allIndices.push_back(start2);
+                allIndices.push_back(end1);
+
+                // Triangle 2
+                allIndices.push_back(end1);
+                allIndices.push_back(start2);
+                allIndices.push_back(end2);
+            }
+        }
+
+        return { allVertices, allIndices };
+    }
+
+    // Instantiate the procedural tree data model and generate its mesh
+    TreeParameters g_treeParams;
+    TreeModel g_tree(g_treeParams);
+    const auto [kVertices, kIndices] = generateTreeMesh(g_tree);
 
     // Validation layer used for catching Vulkan bugs
     const std::vector<const char*> kValidationLayers = {
@@ -1039,10 +1090,10 @@ void Application::updateUniformBuffer(uint32_t currentImage) {
         glm::vec3(0.0f, 0.0f, 1.0f)
     );
 
-    // View matrix: position the camera at (2, 2, 2) looking at the origin (0, 0, 0), with Z pointing up
+    // View matrix: position the camera at (0.0f, -6.0f, 1.0f) looking at the tree midpoint (0.0f, 0.0f, 0.8f)
     ubo.view = glm::lookAt(
-        glm::vec3(2.0f, 2.0f, 2.0f),
-        glm::vec3(0.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, -6.0f, 1.0f),
+        glm::vec3(0.0f, 0.0f, 0.8f),
         glm::vec3(0.0f, 0.0f, 1.0f)
     );
 

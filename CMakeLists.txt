@@ -38,7 +38,7 @@ add_executable(TreeEngine
     src/main.cpp
     src/Application.h
     src/Application.cpp
-)
+ "src/TreeModel.h")
 
 # Link GLFW, GLM, and Vulkan to the executable
 target_link_libraries(TreeEngine PRIVATE

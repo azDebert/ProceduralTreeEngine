@@ -7,6 +7,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "TreeModel.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
