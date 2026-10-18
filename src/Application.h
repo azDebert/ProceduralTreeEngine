@@ -108,6 +108,24 @@ private:
 
     void createFramebuffers();
     void createCommandPool();
+    void createDepthResources();
+    VkFormat findSupportedFormat(
+        const std::vector<VkFormat>& candidates,
+        VkImageTiling tiling,
+        VkFormatFeatureFlags features
+    ) const;
+    VkFormat findDepthFormat() const;
+    void createImage(
+        uint32_t width,
+        uint32_t height,
+        VkFormat format,
+        VkImageTiling tiling,
+        VkImageUsageFlags usage,
+        VkMemoryPropertyFlags properties,
+        VkImage& image,
+        VkDeviceMemory& imageMemory
+    ) const;
+    VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) const;
     void createVertexBuffer();
     void createIndexBuffer();
     void createUniformBuffers();
@@ -158,6 +176,10 @@ private:
     VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
+
+    VkImage m_depthImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_depthImageMemory = VK_NULL_HANDLE;
+    VkImageView m_depthImageView = VK_NULL_HANDLE;
 
     std::vector<VkFramebuffer> m_swapChainFramebuffers;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
