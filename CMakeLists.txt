@@ -24,7 +24,14 @@ set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(glfw)
+# Automatically download GLM for 3D vectors and matrices
+FetchContent_Declare(
+    glm
+    GIT_REPOSITORY https://github.com/g-truc/glm.git
+    GIT_TAG        1.0.1
+)
+
+FetchContent_MakeAvailable(glfw glm)
 
 # Define an executable program from its source/header files
 add_executable(TreeEngine
@@ -33,9 +40,10 @@ add_executable(TreeEngine
     src/Application.cpp
 )
 
-# Link GLFW and Vulkan to the executable
+# Link GLFW, GLM, and Vulkan to the executable
 target_link_libraries(TreeEngine PRIVATE
     glfw
+    glm::glm
     Vulkan::Vulkan
 )
 

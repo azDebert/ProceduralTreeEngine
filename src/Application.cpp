@@ -13,6 +13,13 @@ namespace {
     // Allow CPU to work on 2 frames ahead of the GPU
     constexpr int kMaxFramesInFlight = 2;
 
+    // CPU-side vertex data uploaded to the GPU vertex buffer
+    const std::vector<Vertex> kVertices = {
+        { { 0.0f, -0.5f },{ 1.0f, 0.8f, 0.1f } }, // Top corner (Gold)
+        { { 0.5f,  0.5f },{ 0.1f, 0.9f, 0.4f } }, // Bottom right corner (Green)
+        { { -0.5f,  0.5f },{ 0.6f, 0.2f, 1.0f } }  // Bottom left corner (Violet)
+    };
+
     // Validation layer used for catching Vulkan bugs
     const std::vector<const char*> kValidationLayers = {
         "VK_LAYER_KHRONOS_validation"
@@ -87,6 +94,7 @@ void Application::initVulkan() {
     createGraphicsPipeline();
     createFramebuffers();
     createCommandPool();
+    createVertexBuffer();
     createCommandBuffers();
     createSyncObjects();
 }
@@ -524,9 +532,16 @@ void Application::createGraphicsPipeline() {
 
     VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
-    // No vertex buffers yet (positions are inside triangle.vert)
+    // Bind the C++ Vertex struct layout to the pipeline
+    auto bindingDescription = Vertex::getBindingDescription();
+    auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
     // Draw standard triangles from every 3 vertices
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
@@ -681,6 +696,61 @@ void Application::createCommandPool() {
     }
 }
 
+void Application::createVertexBuffer() {
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = sizeof(kVertices[0]) * kVertices.size();
+    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_vertexBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create vertex buffer!");
+    }
+
+    // Query how much memory the buffer needs and which memory types are compatible
+    VkMemoryRequirements memRequirements{};
+    vkGetBufferMemoryRequirements(m_device, m_vertexBuffer, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = findMemoryType(
+        memRequirements.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    if (vkAllocateMemory(m_device, &allocInfo, nullptr, &m_vertexBufferMemory) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate vertex buffer memory!");
+    }
+
+    // Associate the allocated memory block with the vertex buffer handle
+    vkBindBufferMemory(m_device, m_vertexBuffer, m_vertexBufferMemory, 0);
+
+    // Map the GPU memory into CPU address space, copy the vertices, and unmap
+    void* data = nullptr;
+    vkMapMemory(m_device, m_vertexBufferMemory, 0, bufferInfo.size, 0, &data);
+    std::memcpy(data, kVertices.data(), static_cast<size_t>(bufferInfo.size));
+    vkUnmapMemory(m_device, m_vertexBufferMemory);
+
+    std::cout << "Vertex buffer created and populated (" << kVertices.size() << " vertices, "
+        << bufferInfo.size << " bytes).\n";
+}
+
+uint32_t Application::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const {
+    VkPhysicalDeviceMemoryProperties memProperties{};
+    vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
+
+    for (uint32_t i = 0; i < memProperties.memoryTypeCount; ++i) {
+        // Check if the bit for this memory type is set AND if it has all required property flags
+        if ((typeFilter & (1 << i)) &&
+            (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+
+    throw std::runtime_error("Failed to find suitable memory type!");
+}
+
 void Application::createCommandBuffers() {
     m_commandBuffers.resize(kMaxFramesInFlight);
 
@@ -734,8 +804,13 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
     scissor.extent = m_swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-    // Draw 3 vertices (1 triangle), 1 instance
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    // Bind the vertex buffer to binding point 0
+    VkBuffer vertexBuffers[] = { m_vertexBuffer };
+    VkDeviceSize offsets[] = { 0 };
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+
+    // Draw the vertices stored in the buffer, 1 instance
+    vkCmdDraw(commandBuffer, static_cast<uint32_t>(kVertices.size()), 1, 0, 0);
 
     vkCmdEndRenderPass(commandBuffer);
 
@@ -899,6 +974,16 @@ void Application::mainLoop() {
 
 void Application::cleanup() {
     cleanupSwapChain();
+
+    if (m_vertexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
+        m_vertexBuffer = VK_NULL_HANDLE;
+    }
+
+    if (m_vertexBufferMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
+        m_vertexBufferMemory = VK_NULL_HANDLE;
+    }
 
     if (m_graphicsPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);

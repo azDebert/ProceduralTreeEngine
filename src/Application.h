@@ -2,11 +2,48 @@
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
+
+// Represents a single vertex transferred from the CPU to the GPU
+struct Vertex {
+    glm::vec2 pos;
+    glm::vec3 color;
+
+    // Describes the byte stride between consecutive vertices in the buffer
+    static VkVertexInputBindingDescription getBindingDescription() {
+        VkVertexInputBindingDescription bindingDescription{};
+        bindingDescription.binding = 0;
+        bindingDescription.stride = sizeof(Vertex);
+        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        return bindingDescription;
+    }
+
+    // Describes how individual vertex variables map to shader layout locations
+    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+
+        // Location 0 - pos (vec2 = two 32-bit floats)
+        attributeDescriptions[0].binding = 0;
+        attributeDescriptions[0].location = 0;
+        attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[0].offset = offsetof(Vertex, pos);
+
+        // Location 1 - color (vec3 = three 32-bit floats)
+        attributeDescriptions[1].binding = 0;
+        attributeDescriptions[1].location = 1;
+        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+        return attributeDescriptions;
+    }
+};
 
 // Holds the queue family indices supported by GPU
 struct QueueFamilyIndices {
@@ -60,6 +97,8 @@ private:
 
     void createFramebuffers();
     void createCommandPool();
+    void createVertexBuffer();
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
     void createCommandBuffers();
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) const;
     void createSyncObjects();
@@ -97,6 +136,8 @@ private:
 
     std::vector<VkFramebuffer> m_swapChainFramebuffers;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
+    VkBuffer m_vertexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_vertexBufferMemory = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> m_commandBuffers;
 
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
