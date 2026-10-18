@@ -38,7 +38,8 @@ add_executable(TreeEngine
     src/main.cpp
     src/Application.h
     src/Application.cpp
- "src/TreeModel.h")
+    src/TreeModel.h
+)
 
 # Link GLFW, GLM, and Vulkan to the executable
 target_link_libraries(TreeEngine PRIVATE
@@ -74,3 +75,17 @@ endforeach()
 
 add_custom_target(Shaders ALL DEPENDS ${SPV_SHADERS})
 add_dependencies(TreeEngine Shaders)
+
+# Enable CTest and build the standalone unit test executable for the procedural tree core
+enable_testing()
+
+add_executable(TreeTests
+    tests/TreeModelTests.cpp
+    src/TreeModel.h
+)
+
+target_link_libraries(TreeTests PRIVATE
+    glm::glm
+)
+
+add_test(NAME TreeModelUnitTests COMMAND TreeTests)
