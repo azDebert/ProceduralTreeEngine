@@ -89,6 +89,19 @@ namespace {
     TreeModel g_tree(g_treeParams);
     const auto [kVertices, kIndices] = generateTreeMesh(g_tree);
 
+    // Standard 4-vertex diamond leaf blade mesh in local space (grows along +Y, width along X, slight arch in Z)
+    const std::vector<Vertex> kLeafVertices = {
+        { { 0.00f, 0.00f,  0.00f },{ 0.2f, 0.6f, 0.2f },{ 0.0f, 0.0f, 1.0f } }, // 0: Stem base
+        { { -0.35f, 0.45f,  0.05f },{ 0.2f, 0.6f, 0.2f },{ 0.0f, 0.0f, 1.0f } }, // 1: Left widest point
+        { { 0.00f, 1.00f, -0.05f },{ 0.2f, 0.6f, 0.2f },{ 0.0f, 0.0f, 1.0f } }, // 2: Leaf tip
+        { { 0.35f, 0.45f,  0.05f },{ 0.2f, 0.6f, 0.2f },{ 0.0f, 0.0f, 1.0f } }  // 3: Right widest point
+    };
+
+    const std::vector<uint32_t> kLeafIndices = {
+        0, 1, 2,
+        0, 2, 3
+    };
+
     // Validation layer used for catching Vulkan bugs
     const std::vector<const char*> kValidationLayers = {
         "VK_LAYER_KHRONOS_validation"
@@ -167,6 +180,7 @@ void Application::initVulkan() {
     createFramebuffers();
     createVertexBuffer();
     createIndexBuffer();
+    createLeafBuffers();
     createUniformBuffers();
     createDescriptorPool();
     createDescriptorSets();
@@ -635,14 +649,14 @@ void Application::createGraphicsPipeline() {
 
     VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
-    // Bind the C++ Vertex struct layout to the pipeline
-    auto bindingDescription = Vertex::getBindingDescription();
+    // Bind the C++ Vertex and LeafInstance struct layouts to the pipeline
+    auto bindingDescriptions = Vertex::getBindingDescriptions();
     auto attributeDescriptions = Vertex::getAttributeDescriptions();
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 1;
-    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindingDescriptions.size());
+    vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions.data();
     vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
     vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
@@ -674,7 +688,7 @@ void Application::createGraphicsPipeline() {
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
 
@@ -967,6 +981,60 @@ void Application::createVertexBuffer() {
         << bufferSize << " bytes).\n";
 }
 
+void Application::createLeafBuffers() {
+    // Helper lambda to upload any std::vector to a device-local GPU buffer via staging
+    auto uploadVectorToBuffer = [this](const auto& vec, VkBufferUsageFlags usage, VkBuffer& dstBuffer, VkDeviceMemory& dstMemory) {
+        VkDeviceSize size = sizeof(vec[0]) * vec.size();
+        VkBuffer stagingBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+
+        createBuffer(
+            size,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            stagingBuffer,
+            stagingMemory
+        );
+
+        void* data = nullptr;
+        vkMapMemory(m_device, stagingMemory, 0, size, 0, &data);
+        std::memcpy(data, vec.data(), static_cast<size_t>(size));
+        vkUnmapMemory(m_device, stagingMemory);
+
+        createBuffer(
+            size,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            dstBuffer,
+            dstMemory
+        );
+
+        copyBuffer(stagingBuffer, dstBuffer, size);
+
+        vkDestroyBuffer(m_device, stagingBuffer, nullptr);
+        vkFreeMemory(m_device, stagingMemory, nullptr);
+        };
+
+    // Dummy instance for the trunk/branches (scale = 0.0f tells vertex shader to draw vertices unmodified)
+    std::vector<LeafInstance> trunkDummyInstance = {
+        { glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, glm::vec3(1.0f) }
+    };
+    uploadVectorToBuffer(trunkDummyInstance, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_trunkInstanceBuffer, m_trunkInstanceBufferMemory);
+
+    // Standard 4-vertex leaf blade mesh and its 6 indices
+    uploadVectorToBuffer(kLeafVertices, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_leafVertexBuffer, m_leafVertexBufferMemory);
+    uploadVectorToBuffer(kLeafIndices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, m_leafIndexBuffer, m_leafIndexBufferMemory);
+
+    // Per leaf instance buffer containing all generated leaves from TreeModel
+    const auto& leaves = g_tree.getLeaves();
+    m_leafInstanceCount = static_cast<uint32_t>(leaves.size());
+    if (m_leafInstanceCount > 0) {
+        uploadVectorToBuffer(leaves, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_leafInstanceBuffer, m_leafInstanceBufferMemory);
+    }
+
+    std::cout << "Instanced leaf buffers created (" << m_leafInstanceCount << " individual leaves in 1 draw call).\n";
+}
+
 void Application::createIndexBuffer() {
     VkDeviceSize bufferSize = sizeof(kIndices[0]) * kIndices.size();
 
@@ -1252,14 +1320,6 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
     scissor.extent = m_swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-    // Bind the vertex buffer to binding point 0
-    VkBuffer vertexBuffers[] = { m_vertexBuffer };
-    VkDeviceSize offsets[] = { 0 };
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-
-    // Bind the 32-bit index buffer and draw the indexed triangles
-    vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
     vkCmdBindDescriptorSets(
         commandBuffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1271,7 +1331,20 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
         nullptr
     );
 
+    // Draw the tree trunk and branches (1 instance with scale = 0.0)
+    VkBuffer trunkBuffers[] = { m_vertexBuffer, m_trunkInstanceBuffer };
+    VkDeviceSize offsets[] = { 0, 0 };
+    vkCmdBindVertexBuffers(commandBuffer, 0, 2, trunkBuffers, offsets);
+    vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(kIndices.size()), 1, 0, 0, 0);
+
+    // Draw all individual leaves in a single hardware instanced draw call
+    if (m_leafInstanceCount > 0) {
+        VkBuffer leafBuffers[] = { m_leafVertexBuffer, m_leafInstanceBuffer };
+        vkCmdBindVertexBuffers(commandBuffer, 0, 2, leafBuffers, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, m_leafIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(kLeafIndices.size()), m_leafInstanceCount, 0, 0, 0);
+    }
 
     vkCmdEndRenderPass(commandBuffer);
 
@@ -1476,6 +1549,22 @@ void Application::cleanup() {
         vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
         m_descriptorSetLayout = VK_NULL_HANDLE;
     }
+
+    auto destroyBufferPair = [this](VkBuffer& buf, VkDeviceMemory& mem) {
+        if (buf != VK_NULL_HANDLE) {
+            vkDestroyBuffer(m_device, buf, nullptr);
+            buf = VK_NULL_HANDLE;
+        }
+        if (mem != VK_NULL_HANDLE) {
+            vkFreeMemory(m_device, mem, nullptr);
+            mem = VK_NULL_HANDLE;
+        }
+        };
+
+    destroyBufferPair(m_leafInstanceBuffer, m_leafInstanceBufferMemory);
+    destroyBufferPair(m_leafIndexBuffer, m_leafIndexBufferMemory);
+    destroyBufferPair(m_leafVertexBuffer, m_leafVertexBufferMemory);
+    destroyBufferPair(m_trunkInstanceBuffer, m_trunkInstanceBufferMemory);
 
     if (m_indexBuffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(m_device, m_indexBuffer, nullptr);

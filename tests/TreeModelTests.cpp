@@ -45,6 +45,21 @@ namespace {
         }
 
         std::cout << "[PASS] testValidGeometry (" << segments.size() << " valid segments verified)\n";
+
+        const auto& leaves = tree.getLeaves();
+        if (leaves.empty()) {
+            std::cerr << "[FAIL] testValidGeometry: Tree generated 0 leaves.\n";
+            return false;
+        }
+        for (size_t i = 0; i < leaves.size(); ++i) {
+            if (!isFiniteVec3(leaves[i].position) || !isFiniteVec3(leaves[i].direction) ||
+                !isFiniteVec3(leaves[i].normal) || leaves[i].scale <= 0.0f) {
+                std::cerr << "[FAIL] testValidGeometry: Leaf " << i << " contains invalid data.\n";
+                return false;
+            }
+        }
+        std::cout << "[PASS] testValidLeaves (" << leaves.size() << " valid leaves verified)\n";
+
         return true;
     }
 

@@ -22,38 +22,40 @@ struct Vertex {
     glm::vec3 color;
     glm::vec3 normal;
 
-    // Describes the byte stride between consecutive vertices in the buffer
-    static VkVertexInputBindingDescription getBindingDescription() {
-        VkVertexInputBindingDescription bindingDescription{};
-        bindingDescription.binding = 0;
-        bindingDescription.stride = sizeof(Vertex);
-        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-        return bindingDescription;
+    // Describes Binding 0 (per vertex) and Binding 1 (per instance LeafInstance)
+    static std::array<VkVertexInputBindingDescription, 2> getBindingDescriptions() {
+        std::array<VkVertexInputBindingDescription, 2> bindings{};
+
+        // Binding 0: advances once per vertex
+        bindings[0].binding = 0;
+        bindings[0].stride = sizeof(Vertex);
+        bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        // Binding 1: advances once per drawn instance
+        bindings[1].binding = 1;
+        bindings[1].stride = sizeof(LeafInstance);
+        bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+
+        return bindings;
     }
 
-    // Describes how individual vertex variables map to shader layout locations
-    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
+    // Describes how Vertex (locations 0..2) and LeafInstance (locations 3..7) map to the vertex shader
+    static std::array<VkVertexInputAttributeDescription, 8> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 8> attributes{};
 
-        // Location 0: pos (vec3 = three 32-bit floats)
-        attributeDescriptions[0].binding = 0;
-        attributeDescriptions[0].location = 0;
-        attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[0].offset = offsetof(Vertex, pos);
+        // --- Binding 0: Per Vertex Attributes ---
+        attributes[0] = { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos) };
+        attributes[1] = { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color) };
+        attributes[2] = { 2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal) };
 
-        // Location 1: color (vec3 = three 32-bit floats)
-        attributeDescriptions[1].binding = 0;
-        attributeDescriptions[1].location = 1;
-        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[1].offset = offsetof(Vertex, color);
+        // --- Binding 1: Per Instance Attributes (LeafInstance) ---
+        attributes[3] = { 3, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, position) };
+        attributes[4] = { 4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, direction) };
+        attributes[5] = { 5, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, normal) };
+        attributes[6] = { 6, 1, VK_FORMAT_R32_SFLOAT,       offsetof(LeafInstance, scale) };
+        attributes[7] = { 7, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, color) };
 
-        // Location 2: normal (vec3 = three 32-bit floats)
-        attributeDescriptions[2].binding = 0;
-        attributeDescriptions[2].location = 2;
-        attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[2].offset = offsetof(Vertex, normal);
-
-        return attributeDescriptions;
+        return attributes;
     }
 };
 
@@ -137,6 +139,7 @@ private:
     VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) const;
     void createVertexBuffer();
     void createIndexBuffer();
+    void createLeafBuffers();
     void createUniformBuffers();
     void createDescriptorPool();
     void createDescriptorSets();
@@ -196,6 +199,17 @@ private:
     VkDeviceMemory m_vertexBufferMemory = VK_NULL_HANDLE;
     VkBuffer m_indexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory m_indexBufferMemory = VK_NULL_HANDLE;
+
+    VkBuffer m_trunkInstanceBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_trunkInstanceBufferMemory = VK_NULL_HANDLE;
+
+    VkBuffer m_leafVertexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_leafVertexBufferMemory = VK_NULL_HANDLE;
+    VkBuffer m_leafIndexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_leafIndexBufferMemory = VK_NULL_HANDLE;
+    VkBuffer m_leafInstanceBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_leafInstanceBufferMemory = VK_NULL_HANDLE;
+    uint32_t m_leafInstanceCount = 0;
 
     std::vector<VkBuffer> m_uniformBuffers;
     std::vector<VkDeviceMemory> m_uniformBuffersMemory;
