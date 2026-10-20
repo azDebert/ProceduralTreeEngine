@@ -22,7 +22,7 @@ struct Vertex {
     glm::vec3 color;
     glm::vec3 normal;
 
-    // Describes Binding 0 (per vertex) and Binding 1 (per instance LeafInstance)
+    // Describes Binding 0 (per-vertex) and Binding 1 (per-instance LeafInstance)
     static std::array<VkVertexInputBindingDescription, 2> getBindingDescriptions() {
         std::array<VkVertexInputBindingDescription, 2> bindings{};
 
@@ -39,21 +39,22 @@ struct Vertex {
         return bindings;
     }
 
-    // Describes how Vertex (locations 0..2) and LeafInstance (locations 3..7) map to the vertex shader
-    static std::array<VkVertexInputAttributeDescription, 8> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 8> attributes{};
+    // Describes how Vertex (locations 0..2) and LeafInstance (locations 3..8) map to the vertex shader
+    static std::array<VkVertexInputAttributeDescription, 9> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 9> attributes{};
 
-        // --- Binding 0: Per Vertex Attributes ---
+        // --- Binding 0: Per-Vertex Attributes ---
         attributes[0] = { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos) };
         attributes[1] = { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color) };
         attributes[2] = { 2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal) };
 
-        // --- Binding 1: Per Instance Attributes (LeafInstance) ---
+        // --- Binding 1: Per-Instance Attributes (LeafInstance) ---
         attributes[3] = { 3, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, position) };
         attributes[4] = { 4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, direction) };
         attributes[5] = { 5, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, normal) };
         attributes[6] = { 6, 1, VK_FORMAT_R32_SFLOAT,       offsetof(LeafInstance, scale) };
         attributes[7] = { 7, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, color) };
+        attributes[8] = { 8, 1, VK_FORMAT_R32_SFLOAT,       offsetof(LeafInstance, phase) };
 
         return attributes;
     }
@@ -64,6 +65,8 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
+    alignas(4) float season;
+    alignas(4) float time;
 };
 
 // Holds the queue family indices supported by GPU
@@ -225,4 +228,8 @@ private:
     std::vector<VkFence> m_inFlightFences;
     uint32_t m_currentFrame = 0;
     bool m_framebufferResized = false;
+
+    float m_season = 0.0f;          // 0.0 = Spring, 1.0 = Summer, 2.0 = Autumn, 3.0 = Winter
+    bool m_autoCycleSeasons = true; // Automatically transition smoothly through seasons
+    bool m_spaceKeyPressed = false;
 };

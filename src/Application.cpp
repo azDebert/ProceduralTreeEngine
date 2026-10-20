@@ -902,7 +902,6 @@ void Application::createImage(
     }
 
     VkMemoryRequirements memRequirements{};
-    vkGetBufferMemoryRequirements; // Note: Query image memory requirements below
     vkGetImageMemoryRequirements(m_device, image, &memRequirements);
 
     VkMemoryAllocateInfo allocInfo{};
@@ -1017,7 +1016,7 @@ void Application::createLeafBuffers() {
 
     // Dummy instance for the trunk/branches (scale = 0.0f tells vertex shader to draw vertices unmodified)
     std::vector<LeafInstance> trunkDummyInstance = {
-        { glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, glm::vec3(1.0f) }
+        { glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, glm::vec3(1.0f), 0.0f }
     };
     uploadVectorToBuffer(trunkDummyInstance, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_trunkInstanceBuffer, m_trunkInstanceBufferMemory);
 
@@ -1148,9 +1147,17 @@ void Application::createDescriptorSets() {
 
 void Application::updateUniformBuffer(uint32_t currentImage) {
     static auto startTime = std::chrono::high_resolution_clock::now();
+    static auto lastFrameTime = startTime;
 
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+    float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastFrameTime).count();
+    lastFrameTime = currentTime;
+
+    if (m_autoCycleSeasons) {
+        // Advance 0.25 seasons per second (16 seconds for a full 4-season year)
+        m_season = std::fmod(m_season + deltaTime * 0.25f, 4.0f);
+    }
 
     UniformBufferObject ubo{};
 
@@ -1174,6 +1181,9 @@ void Application::updateUniformBuffer(uint32_t currentImage) {
 
     // GLM was originally designed for OpenGL where the Y clip coordinate is inverted compared to Vulkan
     ubo.proj[1][1] *= -1.0f;
+
+    ubo.season = m_season;
+    ubo.time = time;
 
     std::memcpy(m_uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
@@ -1514,11 +1524,42 @@ void Application::framebufferResizeCallback(GLFWwindow* window, int /*width*/, i
 }
 
 void Application::mainLoop() {
+    std::cout << "Controls: [1] Spring | [2] Summer | [3] Autumn | [4] Winter | [Space] Toggle Auto-Season Cycle\n";
+
     while (!glfwWindowShouldClose(m_window)) {
         glfwPollEvents();
 
         if (glfwGetKey(m_window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+        }
+
+        // Seasonal preset hotkeys (1 = Spring, 2 = Summer, 3 = Autumn, 4 = Winter)
+        if (glfwGetKey(m_window, GLFW_KEY_1) == GLFW_PRESS) {
+            m_season = 0.5f; // Mid Spring
+            m_autoCycleSeasons = false;
+        }
+        if (glfwGetKey(m_window, GLFW_KEY_2) == GLFW_PRESS) {
+            m_season = 1.0f; // Peak Summer
+            m_autoCycleSeasons = false;
+        }
+        if (glfwGetKey(m_window, GLFW_KEY_3) == GLFW_PRESS) {
+            m_season = 2.15f; // Peak Autumn
+            m_autoCycleSeasons = false;
+        }
+        if (glfwGetKey(m_window, GLFW_KEY_4) == GLFW_PRESS) {
+            m_season = 3.2f; // Bare Winter
+            m_autoCycleSeasons = false;
+        }
+
+        // Toggle automatic seasonal progression on Spacebar press
+        if (glfwGetKey(m_window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+            if (!m_spaceKeyPressed) {
+                m_autoCycleSeasons = !m_autoCycleSeasons;
+                m_spaceKeyPressed = true;
+            }
+        }
+        else {
+            m_spaceKeyPressed = false;
         }
         drawFrame();
     }

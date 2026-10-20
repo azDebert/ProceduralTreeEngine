@@ -34,6 +34,7 @@ struct LeafInstance {
     glm::vec3 normal;     // Upward-facing surface normal of the leaf blade
     float scale;          // Uniform size multiplier for this leaf
     glm::vec3 color;      // Per-leaf colour variation
+    float phase;          // Stable [0.0, 1.0] per-leaf identity seed for seasonal timing and autumn hue
 };
 
 // The standalone procedural tree data model
@@ -89,6 +90,7 @@ private:
             std::uniform_real_distribution<float> tiltDist(-0.4f, 0.6f);
             std::uniform_real_distribution<float> scaleDist(0.75f, 1.30f);
             std::uniform_real_distribution<float> colorShift(-0.08f, 0.08f);
+            std::uniform_real_distribution<float> phaseDist(0.0f, 1.0f);
 
             glm::vec3 rawPerp = glm::cross(direction, glm::vec3(0.0f, 1.0f, 0.0f));
             if (glm::length(rawPerp) < 0.001f) {
@@ -118,14 +120,15 @@ private:
                     glm::vec3(0.05f),
                     glm::vec3(0.95f)
                 );
-
+                
                 m_leaves.push_back({
                     leafPos,
                     leafDir,
                     leafNormal,
                     m_params.leafScale * scaleDist(rng),
-                    leafColor
-                    });
+                    leafColor,
+                    phaseDist(rng)
+                });
             }
         }
 
