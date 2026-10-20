@@ -83,8 +83,12 @@ private:
         float endRadius = radius * m_params.radiusShrink;
         m_segments.push_back({ start, end, radius, endRadius });
 
+        // Always draw exactly ONE seed for this twig's leaves so changing leavesPerTwig never alters branch geometry
+        uint32_t twigLeafSeed = rng();
+
         // Spawn individual leaves along outer twigs (depth 1 and 2)
         if (depth <= 2 && m_params.leavesPerTwig > 0) {
+            std::mt19937 leafRng(twigLeafSeed);
             std::uniform_real_distribution<float> alongDist(0.15f, 1.0f);
             std::uniform_real_distribution<float> angleDist(0.0f, 2.0f * glm::pi<float>());
             std::uniform_real_distribution<float> tiltDist(-0.4f, 0.6f);
@@ -100,8 +104,8 @@ private:
             glm::vec3 twigPerp2 = glm::normalize(glm::cross(direction, twigPerp1));
 
             for (int i = 0; i < m_params.leavesPerTwig; ++i) {
-                float t = alongDist(rng);
-                float theta = angleDist(rng);
+                float t = alongDist(leafRng);
+                float theta = angleDist(leafRng);
                 glm::vec3 radialOut = std::cos(theta) * twigPerp1 + std::sin(theta) * twigPerp2;
 
                 // Position the leaf slightly outside the twig surface
@@ -109,26 +113,26 @@ private:
                 glm::vec3 leafPos = glm::mix(start, end, t) + radialOut * (currentRadius + 0.02f);
 
                 // Point the leaf outward from the twig with a natural tilt
-                glm::vec3 leafDir = glm::normalize(radialOut + direction * 0.4f + glm::vec3(0.0f, 0.0f, tiltDist(rng)));
+                glm::vec3 leafDir = glm::normalize(radialOut + direction * 0.4f + glm::vec3(0.0f, 0.0f, tiltDist(leafRng)));
                 glm::vec3 leafRight = glm::normalize(glm::cross(leafDir, glm::vec3(0.0f, 0.0f, 1.0f) + radialOut * 0.2f));
                 glm::vec3 leafNormal = glm::normalize(glm::cross(leafRight, leafDir));
 
-                // Fresh spring/summer green with subtle per leaf variation
-                float shift = colorShift(rng);
+                // Fresh spring/summer green with subtle per-leaf variation
+                float shift = colorShift(leafRng);
                 glm::vec3 leafColor = glm::clamp(
                     glm::vec3(0.20f + shift, 0.62f + shift * 1.2f, 0.18f + shift * 0.5f),
                     glm::vec3(0.05f),
                     glm::vec3(0.95f)
                 );
-                
+
                 m_leaves.push_back({
                     leafPos,
                     leafDir,
                     leafNormal,
-                    m_params.leafScale * scaleDist(rng),
+                    m_params.leafScale * scaleDist(leafRng),
                     leafColor,
-                    phaseDist(rng)
-                });
+                    phaseDist(leafRng)
+                    });
             }
         }
 

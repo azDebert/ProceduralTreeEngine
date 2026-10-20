@@ -7,6 +7,7 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 proj;
     float season; // Continuous season: 0.0 = Spring, 1.0 = Summer, 2.0 = Autumn, 3.0 = Winter
     float time;   // Elapsed time in seconds for gentle wind and falling animation
+    float windStrength; // Wind intensity multiplier
 } ubo;
 
 // Binding 0: Per-vertex attributes (inputRate = VERTEX)
@@ -114,6 +115,16 @@ void main() {
                  + forward * scaled.y
                  + tiltedUp * scaled.z;
         localNormal = tiltedUp;
+    }
+
+    // Apply continuous wind sway to branches and attached leaves above ground level (Z > -1.0)
+    float heightAboveGround = max(localPos.z - (-1.0), 0.0);
+    if (heightAboveGround > 0.01 && ubo.windStrength > 0.0) {
+        float bendFactor = heightAboveGround * heightAboveGround * 0.035 * ubo.windStrength;
+        float windWaveX = sin(ubo.time * 1.8 + localPos.x * 0.7 + localPos.y * 0.5) * bendFactor;
+        float windWaveY = cos(ubo.time * 1.4 + localPos.y * 0.6) * bendFactor * 0.5;
+        localPos.x += windWaveX;
+        localPos.y += windWaveY;
     }
 
     gl_Position = ubo.proj * ubo.view * ubo.model * vec4(localPos, 1.0);

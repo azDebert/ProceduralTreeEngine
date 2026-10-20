@@ -14,80 +14,116 @@ namespace {
     // Allow CPU to work on 2 frames ahead of the GPU
     constexpr int kMaxFramesInFlight = 2;
 
-    // Helper function to build a combined Vertex and 32-bit Index buffer from a TreeModel
-    std::pair<std::vector<Vertex>, std::vector<uint32_t>> generateTreeMesh(const TreeModel& tree) {
-        std::vector<Vertex> allVertices;
-        std::vector<uint32_t> allIndices;
+    struct SceneGeometry {
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indices;
+        std::vector<LeafInstance> leaves;
+    };
 
-        const auto& segments = tree.getSegments();
-        int radialSegments = 12;
+    // Builds the ground plane and 1 or more procedural trees in world space
+    SceneGeometry buildSceneGeometry(const TreeParameters& baseParams, bool forestGrove) {
+        SceneGeometry scene;
 
-        for (const auto& seg : segments) {
-            glm::vec3 dir = seg.end - seg.start;
-            float length = glm::length(dir);
-            if (length < 0.0001f) continue;
-            dir = glm::normalize(dir);
+        // Add an octagonal ground plane at Z = -1.0f so trees stand on solid earth
+        const float groundRadius = forestGrove ? 7.5f : 3.5f;
+        const int groundSides = 24;
+        const glm::vec3 groundColor(0.22f, 0.28f, 0.18f);
+        const glm::vec3 upNormal(0.0f, 0.0f, 1.0f);
 
-            // Find perpendicular vectors for the radial ring (check length BEFORE normalising to avoid NaN)
-            glm::vec3 rawPerp = glm::cross(dir, glm::vec3(0.0f, 1.0f, 0.0f));
-            if (glm::length(rawPerp) < 0.001f) {
-                rawPerp = glm::cross(dir, glm::vec3(1.0f, 0.0f, 0.0f));
+        uint32_t centerIdx = static_cast<uint32_t>(scene.vertices.size());
+        scene.vertices.push_back({ { 0.0f, 0.0f, -1.0f }, groundColor, upNormal });
+
+        for (int i = 0; i <= groundSides; ++i) {
+            float angle = static_cast<float>(i) / static_cast<float>(groundSides) * 2.0f * glm::pi<float>();
+            scene.vertices.push_back({
+                { std::cos(angle) * groundRadius, std::sin(angle) * groundRadius, -1.0f },
+                groundColor * 0.85f,
+                upNormal
+                });
+        }
+
+        for (int i = 0; i < groundSides; ++i) {
+            scene.indices.push_back(centerIdx);
+            scene.indices.push_back(centerIdx + 1 + static_cast<uint32_t>(i));
+            scene.indices.push_back(centerIdx + 1 + static_cast<uint32_t>(i + 1));
+        }
+
+        // Define tree placements (1 centre tree, or 5 trees in a grove)
+        std::vector<glm::vec3> treeOffsets = { glm::vec3(0.0f, 0.0f, 0.0f) };
+        if (forestGrove) {
+            treeOffsets.push_back(glm::vec3(-3.2f, -1.8f, 0.0f));
+            treeOffsets.push_back(glm::vec3(3.2f, -1.6f, 0.0f));
+            treeOffsets.push_back(glm::vec3(-2.4f, 2.8f, 0.0f));
+            treeOffsets.push_back(glm::vec3(2.6f, 2.5f, 0.0f));
+        }
+
+        int radialSegments = baseParams.radialSegments;
+
+        for (size_t t = 0; t < treeOffsets.size(); ++t) {
+            TreeParameters params = baseParams;
+            params.seed = baseParams.seed + static_cast<uint32_t>(t * 101);
+            TreeModel tree(params);
+
+            glm::vec3 worldOffset = treeOffsets[t];
+
+            // Append branch cylinder meshes
+            for (const auto& seg : tree.getSegments()) {
+                glm::vec3 dir = seg.end - seg.start;
+                float length = glm::length(dir);
+                if (length < 0.0001f) continue;
+                dir = glm::normalize(dir);
+
+                glm::vec3 rawPerp = glm::cross(dir, glm::vec3(0.0f, 1.0f, 0.0f));
+                if (glm::length(rawPerp) < 0.001f) {
+                    rawPerp = glm::cross(dir, glm::vec3(1.0f, 0.0f, 0.0f));
+                }
+                glm::vec3 perp1 = glm::normalize(rawPerp);
+                glm::vec3 perp2 = glm::normalize(glm::cross(dir, perp1));
+
+                uint32_t baseIndex = static_cast<uint32_t>(scene.vertices.size());
+
+                for (int i = 0; i <= radialSegments; ++i) {
+                    float theta = static_cast<float>(i) / static_cast<float>(radialSegments) * 2.0f * glm::pi<float>();
+                    glm::vec3 normal = glm::normalize(perp1 * std::cos(theta) + perp2 * std::sin(theta));
+
+                    scene.vertices.push_back({
+                        seg.start + worldOffset + normal * seg.startRadius,
+                        { 0.42f, 0.27f, 0.14f },
+                        normal
+                        });
+
+                    scene.vertices.push_back({
+                        seg.end + worldOffset + normal * seg.endRadius,
+                        { 0.50f, 0.34f, 0.18f },
+                        normal
+                        });
+                }
+
+                for (int i = 0; i < radialSegments; ++i) {
+                    uint32_t start1 = baseIndex + static_cast<uint32_t>(i * 2);
+                    uint32_t end1 = baseIndex + static_cast<uint32_t>(i * 2 + 1);
+                    uint32_t start2 = baseIndex + static_cast<uint32_t>((i + 1) * 2);
+                    uint32_t end2 = baseIndex + static_cast<uint32_t>((i + 1) * 2 + 1);
+
+                    scene.indices.push_back(start1);
+                    scene.indices.push_back(start2);
+                    scene.indices.push_back(end1);
+
+                    scene.indices.push_back(end1);
+                    scene.indices.push_back(start2);
+                    scene.indices.push_back(end2);
+                }
             }
-            glm::vec3 perp1 = glm::normalize(rawPerp);
-            glm::vec3 perp2 = glm::normalize(glm::cross(dir, perp1));
 
-            uint32_t baseIndex = static_cast<uint32_t>(allVertices.size());
-
-            // Generate start and end rings
-            for (int i = 0; i <= radialSegments; ++i) {
-                float theta = static_cast<float>(i) / static_cast<float>(radialSegments) * 2.0f * glm::pi<float>();
-                float c = std::cos(theta);
-                float s = std::sin(theta);
-
-                // Outward unit normal vector around the cylinder circumference
-                glm::vec3 normal = glm::normalize(perp1 * c + perp2 * s);
-
-                // Start ring vertex (Thicker, darker bark + outward surface normal)
-                allVertices.push_back({
-                    seg.start + normal * seg.startRadius,
-                    { 0.42f, 0.27f, 0.14f },
-                    normal
-                    });
-
-                // End ring vertex (Thinner bark + outward surface normal)
-                allVertices.push_back({
-                    seg.end + normal * seg.endRadius,
-                    { 0.50f, 0.34f, 0.18f },
-                    normal
-                    });
-            }
-
-            // Generate quad indices for this branch segment
-            for (int i = 0; i < radialSegments; ++i) {
-                uint32_t start1 = baseIndex + static_cast<uint32_t>(i * 2);
-                uint32_t end1 = baseIndex + static_cast<uint32_t>(i * 2 + 1);
-                uint32_t start2 = baseIndex + static_cast<uint32_t>((i + 1) * 2);
-                uint32_t end2 = baseIndex + static_cast<uint32_t>((i + 1) * 2 + 1);
-
-                // Triangle 1
-                allIndices.push_back(start1);
-                allIndices.push_back(start2);
-                allIndices.push_back(end1);
-
-                // Triangle 2
-                allIndices.push_back(end1);
-                allIndices.push_back(start2);
-                allIndices.push_back(end2);
+            // Append leaf instances shifted by this tree's world offset
+            for (auto leaf : tree.getLeaves()) {
+                leaf.position += worldOffset;
+                scene.leaves.push_back(leaf);
             }
         }
 
-        return { allVertices, allIndices };
+        return scene;
     }
-
-    // Instantiate the procedural tree data model and generate its mesh
-    TreeParameters g_treeParams;
-    TreeModel g_tree(g_treeParams);
-    const auto [kVertices, kIndices] = generateTreeMesh(g_tree);
 
     // Standard 4-vertex diamond leaf blade mesh in local space (grows along +Y, width along X, slight arch in Z)
     const std::vector<Vertex> kLeafVertices = {
@@ -178,9 +214,7 @@ void Application::initVulkan() {
     createCommandPool();
     createDepthResources();
     createFramebuffers();
-    createVertexBuffer();
-    createIndexBuffer();
-    createLeafBuffers();
+    createSceneBuffers();
     createUniformBuffers();
     createDescriptorPool();
     createDescriptorSets();
@@ -939,49 +973,7 @@ VkImageView Application::createImageView(
 
     return imageView;
 }
-
-void Application::createVertexBuffer() {
-    VkDeviceSize bufferSize = sizeof(kVertices[0]) * kVertices.size();
-
-    // 1. Create a CPU-visible staging buffer as the transfer source
-    VkBuffer stagingBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory stagingBufferMemory = VK_NULL_HANDLE;
-    createBuffer(
-        bufferSize,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        stagingBuffer,
-        stagingBufferMemory
-    );
-
-    // 2. Map memory and copy vertex data into the staging buffer
-    void* data = nullptr;
-    vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, 0, &data);
-    std::memcpy(data, kVertices.data(), static_cast<size_t>(bufferSize));
-    vkUnmapMemory(m_device, stagingBufferMemory);
-
-    // 3. Create the actual vertex buffer in fast GPU-local VRAM
-    createBuffer(
-        bufferSize,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        m_vertexBuffer,
-        m_vertexBufferMemory
-    );
-
-    // 4. Copy from staging buffer to device-local vertex buffer on the GPU
-    copyBuffer(stagingBuffer, m_vertexBuffer, bufferSize);
-
-    // 5. Clean up the temporary staging buffer
-    vkDestroyBuffer(m_device, stagingBuffer, nullptr);
-    vkFreeMemory(m_device, stagingBufferMemory, nullptr);
-
-    std::cout << "Device-local vertex buffer created (" << kVertices.size() << " vertices, "
-        << bufferSize << " bytes).\n";
-}
-
-void Application::createLeafBuffers() {
-    // Helper lambda to upload any std::vector to a device-local GPU buffer via staging
+void Application::createSceneBuffers() {
     auto uploadVectorToBuffer = [this](const auto& vec, VkBufferUsageFlags usage, VkBuffer& dstBuffer, VkDeviceMemory& dstMemory) {
         VkDeviceSize size = sizeof(vec[0]) * vec.size();
         VkBuffer stagingBuffer = VK_NULL_HANDLE;
@@ -1014,64 +1006,54 @@ void Application::createLeafBuffers() {
         vkFreeMemory(m_device, stagingMemory, nullptr);
         };
 
-    // Dummy instance for the trunk/branches (scale = 0.0f tells vertex shader to draw vertices unmodified)
+    SceneGeometry scene = buildSceneGeometry(m_treeParams, m_forestGroveMode);
+    m_indexCount = static_cast<uint32_t>(scene.indices.size());
+    m_leafInstanceCount = static_cast<uint32_t>(scene.leaves.size());
+
+    uploadVectorToBuffer(scene.vertices, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_vertexBuffer, m_vertexBufferMemory);
+    uploadVectorToBuffer(scene.indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, m_indexBuffer, m_indexBufferMemory);
+
     std::vector<LeafInstance> trunkDummyInstance = {
         { glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, glm::vec3(1.0f), 0.0f }
     };
     uploadVectorToBuffer(trunkDummyInstance, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_trunkInstanceBuffer, m_trunkInstanceBufferMemory);
 
-    // Standard 4-vertex leaf blade mesh and its 6 indices
     uploadVectorToBuffer(kLeafVertices, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_leafVertexBuffer, m_leafVertexBufferMemory);
     uploadVectorToBuffer(kLeafIndices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, m_leafIndexBuffer, m_leafIndexBufferMemory);
 
-    // Per leaf instance buffer containing all generated leaves from TreeModel
-    const auto& leaves = g_tree.getLeaves();
-    m_leafInstanceCount = static_cast<uint32_t>(leaves.size());
     if (m_leafInstanceCount > 0) {
-        uploadVectorToBuffer(leaves, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_leafInstanceBuffer, m_leafInstanceBufferMemory);
+        uploadVectorToBuffer(scene.leaves, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_leafInstanceBuffer, m_leafInstanceBufferMemory);
     }
 
-    std::cout << "Instanced leaf buffers created (" << m_leafInstanceCount << " individual leaves in 1 draw call).\n";
+    std::cout << "Scene built: " << (m_forestGroveMode ? 5 : 1) << " tree(s) | "
+        << scene.vertices.size() << " branch verts | "
+        << m_leafInstanceCount << " instanced leaves | Seed: " << m_treeParams.seed << '\n';
 }
 
-void Application::createIndexBuffer() {
-    VkDeviceSize bufferSize = sizeof(kIndices[0]) * kIndices.size();
+void Application::destroySceneBuffers() {
+    auto destroyBufferPair = [this](VkBuffer& buf, VkDeviceMemory& mem) {
+        if (buf != VK_NULL_HANDLE) {
+            vkDestroyBuffer(m_device, buf, nullptr);
+            buf = VK_NULL_HANDLE;
+        }
+        if (mem != VK_NULL_HANDLE) {
+            vkFreeMemory(m_device, mem, nullptr);
+            mem = VK_NULL_HANDLE;
+        }
+        };
 
-    // 1. Create a CPU-visible staging buffer
-    VkBuffer stagingBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory stagingBufferMemory = VK_NULL_HANDLE;
-    createBuffer(
-        bufferSize,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        stagingBuffer,
-        stagingBufferMemory
-    );
+    destroyBufferPair(m_leafInstanceBuffer, m_leafInstanceBufferMemory);
+    destroyBufferPair(m_leafIndexBuffer, m_leafIndexBufferMemory);
+    destroyBufferPair(m_leafVertexBuffer, m_leafVertexBufferMemory);
+    destroyBufferPair(m_trunkInstanceBuffer, m_trunkInstanceBufferMemory);
+    destroyBufferPair(m_indexBuffer, m_indexBufferMemory);
+    destroyBufferPair(m_vertexBuffer, m_vertexBufferMemory);
+}
 
-    // 2. Copy index data into the staging buffer
-    void* data = nullptr;
-    vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, 0, &data);
-    std::memcpy(data, kIndices.data(), static_cast<size_t>(bufferSize));
-    vkUnmapMemory(m_device, stagingBufferMemory);
-
-    // 3. Create the index buffer in fast GPU-local VRAM
-    createBuffer(
-        bufferSize,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        m_indexBuffer,
-        m_indexBufferMemory
-    );
-
-    // 4. Copy from staging buffer to device-local index buffer
-    copyBuffer(stagingBuffer, m_indexBuffer, bufferSize);
-
-    // 5. Clean up the temporary staging buffer
-    vkDestroyBuffer(m_device, stagingBuffer, nullptr);
-    vkFreeMemory(m_device, stagingBufferMemory, nullptr);
-
-    std::cout << "Device-local index buffer created (" << kIndices.size() << " indices, "
-        << bufferSize << " bytes).\n";
+void Application::rebuildSceneBuffers() {
+    vkDeviceWaitIdle(m_device);
+    destroySceneBuffers();
+    createSceneBuffers();
 }
 
 void Application::createUniformBuffers() {
@@ -1154,38 +1136,136 @@ void Application::updateUniformBuffer(uint32_t currentImage) {
     float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastFrameTime).count();
     lastFrameTime = currentTime;
 
+    processInput(deltaTime);
+
     if (m_autoCycleSeasons) {
-        // Advance 0.25 seasons per second (16 seconds for a full 4-season year)
-        m_season = std::fmod(m_season + deltaTime * 0.25f, 4.0f);
+        m_season = std::fmod(m_season + deltaTime * 0.22f, 4.0f);
+    }
+    if (m_autoOrbitCamera) {
+        m_cameraYaw += deltaTime * 25.0f;
+    }
+
+    // Update performance profiling in the window title bar every 0.5 seconds
+    m_frameCount++;
+    m_fpsTimer += deltaTime;
+    if (m_fpsTimer >= 0.5f) {
+        float fps = static_cast<float>(m_frameCount) / m_fpsTimer;
+        float frameMs = 1000.0f / std::max(fps, 1.0f);
+        const char* seasonNames[] = { "Spring", "Summer", "Autumn", "Winter" };
+        int seasonIdx = static_cast<int>(std::floor(m_season)) % 4;
+
+        std::string title = m_title + " | " + seasonNames[seasonIdx]
+            + " | Leaves: " + std::to_string(m_leafInstanceCount)
+            + " | " + std::to_string(static_cast<int>(fps)) + " FPS ("
+            + std::to_string(frameMs).substr(0, 4) + " ms)";
+        glfwSetWindowTitle(m_window, title.c_str());
+
+        m_frameCount = 0;
+        m_fpsTimer = 0.0f;
     }
 
     UniformBufferObject ubo{};
+    ubo.model = glm::mat4(1.0f);
 
-    // Model matrix: rotate 45 degrees per second around the Z-axis
-    ubo.model = glm::rotate(
-        glm::mat4(1.0f),
-        time * glm::radians(45.0f),
-        glm::vec3(0.0f, 0.0f, 1.0f)
+    // Spherical orbit camera calculation
+    float yawRad = glm::radians(m_cameraYaw);
+    float pitchRad = glm::radians(m_cameraPitch);
+    glm::vec3 target(0.0f, 0.0f, m_cameraTargetZ);
+    glm::vec3 eye(
+        target.x + m_cameraDistance * std::cos(pitchRad) * std::sin(yawRad),
+        target.y - m_cameraDistance * std::cos(pitchRad) * std::cos(yawRad),
+        target.z + m_cameraDistance * std::sin(pitchRad)
     );
 
-    // View matrix: position the camera at (0.0f, -8.0f, 1.8f) looking at the tree centre (0.0f, 0.0f, 1.5f)
-    ubo.view = glm::lookAt(
-        glm::vec3(0.0f, -8.0f, 1.8f),
-        glm::vec3(0.0f, 0.0f, 1.5f),
-        glm::vec3(0.0f, 0.0f, 1.0f)
-    );
+    ubo.view = glm::lookAt(eye, target, glm::vec3(0.0f, 0.0f, 1.0f));
 
-    // Projection matrix: 45 degree vertical field of view, matching the current swapchain aspect ratio
     float aspectRatio = static_cast<float>(m_swapChainExtent.width) / static_cast<float>(m_swapChainExtent.height);
-    ubo.proj = glm::perspective(glm::radians(45.0f), aspectRatio, 0.1f, 10.0f);
-
-    // GLM was originally designed for OpenGL where the Y clip coordinate is inverted compared to Vulkan
+    ubo.proj = glm::perspective(glm::radians(45.0f), aspectRatio, 0.1f, 50.0f);
     ubo.proj[1][1] *= -1.0f;
 
     ubo.season = m_season;
     ubo.time = time;
+    ubo.windStrength = m_windStrength;
 
     std::memcpy(m_uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+}
+
+void Application::processInput(float deltaTime) {
+    // Camera Orbit (A/D or Left/Right for Yaw, W/S or Up/Down for Pitch)
+    if (glfwGetKey(m_window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(m_window, GLFW_KEY_LEFT) == GLFW_PRESS) {
+        m_cameraYaw -= 65.0f * deltaTime;
+        m_autoOrbitCamera = false;
+    }
+    if (glfwGetKey(m_window, GLFW_KEY_D) == GLFW_PRESS || glfwGetKey(m_window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
+        m_cameraYaw += 65.0f * deltaTime;
+        m_autoOrbitCamera = false;
+    }
+    if (glfwGetKey(m_window, GLFW_KEY_W) == GLFW_PRESS || glfwGetKey(m_window, GLFW_KEY_UP) == GLFW_PRESS) {
+        m_cameraPitch = std::clamp(m_cameraPitch + 45.0f * deltaTime, -5.0f, 80.0f);
+    }
+    if (glfwGetKey(m_window, GLFW_KEY_S) == GLFW_PRESS || glfwGetKey(m_window, GLFW_KEY_DOWN) == GLFW_PRESS) {
+        m_cameraPitch = std::clamp(m_cameraPitch - 45.0f * deltaTime, -5.0f, 80.0f);
+    }
+
+    // Camera Zoom (Q/E) and Vertical Pan (R/F)
+    if (glfwGetKey(m_window, GLFW_KEY_Q) == GLFW_PRESS) {
+        m_cameraDistance = std::clamp(m_cameraDistance - 6.0f * deltaTime, 2.0f, 25.0f);
+    }
+    if (glfwGetKey(m_window, GLFW_KEY_E) == GLFW_PRESS) {
+        m_cameraDistance = std::clamp(m_cameraDistance + 6.0f * deltaTime, 2.0f, 25.0f);
+    }
+    if (glfwGetKey(m_window, GLFW_KEY_R) == GLFW_PRESS) {
+        m_cameraTargetZ = std::clamp(m_cameraTargetZ + 3.0f * deltaTime, -0.5f, 5.0f);
+    }
+    if (glfwGetKey(m_window, GLFW_KEY_F) == GLFW_PRESS) {
+        m_cameraTargetZ = std::clamp(m_cameraTargetZ - 3.0f * deltaTime, -0.5f, 5.0f);
+    }
+
+    // Single-press action hotkeys for tree regeneration, grove mode, and parameters
+    bool nDown = glfwGetKey(m_window, GLFW_KEY_N) == GLFW_PRESS;
+    bool gDown = glfwGetKey(m_window, GLFW_KEY_G) == GLFW_PRESS;
+    bool lBracket = glfwGetKey(m_window, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS;
+    bool rBracket = glfwGetKey(m_window, GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS;
+    bool minusKey = glfwGetKey(m_window, GLFW_KEY_MINUS) == GLFW_PRESS;
+    bool equalKey = glfwGetKey(m_window, GLFW_KEY_EQUAL) == GLFW_PRESS;
+    bool oDown = glfwGetKey(m_window, GLFW_KEY_O) == GLFW_PRESS;
+
+    if (nDown || gDown || lBracket || rBracket || minusKey || equalKey || oDown) {
+        if (!m_actionKeyLatch) {
+            m_actionKeyLatch = true;
+            if (nDown) {
+                m_treeParams.seed += 1;
+                rebuildSceneBuffers();
+            }
+            else if (gDown) {
+                m_forestGroveMode = !m_forestGroveMode;
+                m_cameraDistance = m_forestGroveMode ? 14.0f : 8.5f;
+                rebuildSceneBuffers();
+            }
+            else if (lBracket) {
+                m_treeParams.branchAngle = std::clamp(m_treeParams.branchAngle - 5.0f, 15.0f, 65.0f);
+                rebuildSceneBuffers();
+            }
+            else if (rBracket) {
+                m_treeParams.branchAngle = std::clamp(m_treeParams.branchAngle + 5.0f, 15.0f, 65.0f);
+                rebuildSceneBuffers();
+            }
+            else if (minusKey) {
+                m_treeParams.leavesPerTwig = std::clamp(m_treeParams.leavesPerTwig - 4, 0, 40);
+                rebuildSceneBuffers();
+            }
+            else if (equalKey) {
+                m_treeParams.leavesPerTwig = std::clamp(m_treeParams.leavesPerTwig + 4, 0, 40);
+                rebuildSceneBuffers();
+            }
+            else if (oDown) {
+                m_autoOrbitCamera = !m_autoOrbitCamera;
+            }
+        }
+    }
+    else {
+        m_actionKeyLatch = false;
+    }
 }
 
 void Application::createBuffer(
@@ -1341,12 +1421,12 @@ void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t im
         nullptr
     );
 
-    // Draw the tree trunk and branches (1 instance with scale = 0.0)
+    // 1. Draw the tree trunk, branches, and ground plane (1 instance with scale = 0.0)
     VkBuffer trunkBuffers[] = { m_vertexBuffer, m_trunkInstanceBuffer };
     VkDeviceSize offsets[] = { 0, 0 };
     vkCmdBindVertexBuffers(commandBuffer, 0, 2, trunkBuffers, offsets);
     vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(kIndices.size()), 1, 0, 0, 0);
+    vkCmdDrawIndexed(commandBuffer, m_indexCount, 1, 0, 0, 0);
 
     // Draw all individual leaves in a single hardware instanced draw call
     if (m_leafInstanceCount > 0) {
@@ -1524,7 +1604,12 @@ void Application::framebufferResizeCallback(GLFWwindow* window, int /*width*/, i
 }
 
 void Application::mainLoop() {
-    std::cout << "Controls: [1] Spring | [2] Summer | [3] Autumn | [4] Winter | [Space] Toggle Auto-Season Cycle\n";
+
+    std::cout << "\n=== Interactive Tree Viewer Controls ===\n"
+        << "  [W/A/S/D] or [Arrows] : Orbit Camera  | [Q/E] Zoom | [R/F] Pan Height | [O] Toggle Auto-Orbit\n"
+        << "  [1/2/3/4]             : Seasons       | [Space] Toggle Auto-Season Cycle\n"
+        << "  [N]                   : New Tree Seed | [G] Toggle 5-Tree Forest Grove\n"
+        << "  [ / ]                 : Branch Angle  | [- / =] Decrease/Increase Leaf Density\n\n";
 
     while (!glfwWindowShouldClose(m_window)) {
         glfwPollEvents();
@@ -1607,25 +1692,7 @@ void Application::cleanup() {
     destroyBufferPair(m_leafVertexBuffer, m_leafVertexBufferMemory);
     destroyBufferPair(m_trunkInstanceBuffer, m_trunkInstanceBufferMemory);
 
-    if (m_indexBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(m_device, m_indexBuffer, nullptr);
-        m_indexBuffer = VK_NULL_HANDLE;
-    }
-
-    if (m_indexBufferMemory != VK_NULL_HANDLE) {
-        vkFreeMemory(m_device, m_indexBufferMemory, nullptr);
-        m_indexBufferMemory = VK_NULL_HANDLE;
-    }
-
-    if (m_vertexBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
-        m_vertexBuffer = VK_NULL_HANDLE;
-    }
-
-    if (m_vertexBufferMemory != VK_NULL_HANDLE) {
-        vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
-        m_vertexBufferMemory = VK_NULL_HANDLE;
-    }
+    destroySceneBuffers();
 
     if (m_graphicsPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);

@@ -110,6 +110,33 @@ namespace {
             return false;
         }
 
+        // Verify that changing leaf density does NOT alter the branch skeleton
+        TreeParameters paramsLowLeaves{};
+        paramsLowLeaves.seed = 42;
+        paramsLowLeaves.leavesPerTwig = 2;
+
+        TreeParameters paramsHighLeaves{};
+        paramsHighLeaves.seed = 42;
+        paramsHighLeaves.leavesPerTwig = 30;
+
+        TreeModel treeLow(paramsLowLeaves);
+        TreeModel treeHigh(paramsHighLeaves);
+
+        const auto& segsLow = treeLow.getSegments();
+        const auto& segsHigh = treeHigh.getSegments();
+
+        if (segsLow.size() != segsHigh.size()) {
+            std::cerr << "[FAIL] testDeterministicSeeds: Leaf density altered branch count!\n";
+            return false;
+        }
+
+        for (size_t i = 0; i < segsLow.size(); ++i) {
+            if (segsLow[i].start != segsHigh[i].start || segsLow[i].end != segsHigh[i].end) {
+                std::cerr << "[FAIL] testDeterministicSeeds: Leaf density altered branch geometry at segment " << i << "!\n";
+                return false;
+            }
+        }
+
         std::cout << "[PASS] testDeterministicSeeds (Repeatability and seed variation verified)\n";
         return true;
     }

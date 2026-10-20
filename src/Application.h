@@ -67,6 +67,7 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 proj;
     alignas(4) float season;
     alignas(4) float time;
+    alignas(4) float windStrength;
 };
 
 // Holds the queue family indices supported by GPU
@@ -140,9 +141,10 @@ private:
         VkDeviceMemory& imageMemory
     ) const;
     VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) const;
-    void createVertexBuffer();
-    void createIndexBuffer();
-    void createLeafBuffers();
+    void createSceneBuffers();
+    void destroySceneBuffers();
+    void rebuildSceneBuffers();
+    void processInput(float deltaTime);
     void createUniformBuffers();
     void createDescriptorPool();
     void createDescriptorSets();
@@ -202,6 +204,7 @@ private:
     VkDeviceMemory m_vertexBufferMemory = VK_NULL_HANDLE;
     VkBuffer m_indexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory m_indexBufferMemory = VK_NULL_HANDLE;
+    uint32_t m_indexCount = 0;
 
     VkBuffer m_trunkInstanceBuffer = VK_NULL_HANDLE;
     VkDeviceMemory m_trunkInstanceBufferMemory = VK_NULL_HANDLE;
@@ -232,4 +235,21 @@ private:
     float m_season = 0.0f;          // 0.0 = Spring, 1.0 = Summer, 2.0 = Autumn, 3.0 = Winter
     bool m_autoCycleSeasons = true; // Automatically transition smoothly through seasons
     bool m_spaceKeyPressed = false;
+
+    // Interactive camera orbit, pan, and zoom state
+    float m_cameraYaw = 0.0f;
+    float m_cameraPitch = 15.0f;
+    float m_cameraDistance = 8.5f;
+    float m_cameraTargetZ = 1.2f;
+    bool m_autoOrbitCamera = true;
+
+    // Interactive tree, wind, and grove state
+    TreeParameters m_treeParams{};
+    bool m_forestGroveMode = false; // Toggle between 1 tree and a 5-tree grove
+    float m_windStrength = 1.0f;
+    bool m_actionKeyLatch = false;
+
+    // Performance profiling state
+    uint32_t m_frameCount = 0;
+    float m_fpsTimer = 0.0f;
 };
