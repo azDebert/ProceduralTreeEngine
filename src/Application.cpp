@@ -1,4 +1,5 @@
 #include "Application.h"
+#include "TreeSerializer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -60,8 +61,11 @@ namespace {
         int radialSegments = baseParams.radialSegments;
 
         for (size_t t = 0; t < treeOffsets.size(); ++t) {
-            TreeParameters params = baseParams;
-            params.seed = baseParams.seed + static_cast<uint32_t>(t * 101);
+            // In 5-tree grove mode, showcase all 5 botanical species side-by-side (or variations)
+            TreeParameters params = (forestGrove && t > 0)
+                ? getSpeciesPreset(static_cast<TreeSpecies>(t % static_cast<size_t>(TreeSpecies::Count)), baseParams.seed + static_cast<uint32_t>(t * 101))
+                : baseParams;
+            int radialSegments = params.radialSegments;
             TreeModel tree(params);
 
             glm::vec3 worldOffset = treeOffsets[t];
@@ -86,15 +90,22 @@ namespace {
                     float theta = static_cast<float>(i) / static_cast<float>(radialSegments) * 2.0f * glm::pi<float>();
                     glm::vec3 normal = glm::normalize(perp1 * std::cos(theta) + perp2 * std::sin(theta));
 
+                    // Add natural bark shading (and dark horizontal lenticel bands for Silver Birch)
+                    glm::vec3 startBark = seg.barkColor * 0.90f;
+                    glm::vec3 endBark = seg.barkColor * 1.08f;
+                    if (params.species == TreeSpecies::SilverBirch && std::sin(seg.start.z * 14.0f) > 0.65f) {
+                        startBark *= 0.35f;
+                    }
+
                     scene.vertices.push_back({
                         seg.start + worldOffset + normal * seg.startRadius,
-                        { 0.42f, 0.27f, 0.14f },
+                        startBark,
                         normal
                         });
 
                     scene.vertices.push_back({
                         seg.end + worldOffset + normal * seg.endRadius,
-                        { 0.50f, 0.34f, 0.18f },
+                        endBark,
                         normal
                         });
                 }
@@ -115,9 +126,13 @@ namespace {
                 }
             }
 
-            // Append leaf instances shifted by this tree's world offset
+            // Give each tree in the grove a slight seasonal offset so some trees turn autumn orange earlier than others
+            float treePhaseShift = static_cast<float>(t) * 0.14f;
             for (auto leaf : tree.getLeaves()) {
                 leaf.position += worldOffset;
+                float baseBucket = std::floor(leaf.phase); // Preserve 0.0 (Deciduous), 1.0 (Sakura), 2.0 (Evergreen)
+                float fracPhase = std::fmod(leaf.phase - baseBucket + treePhaseShift, 0.99f);
+                leaf.phase = baseBucket + fracPhase;
                 scene.leaves.push_back(leaf);
             }
         }
@@ -1014,7 +1029,7 @@ void Application::createSceneBuffers() {
     uploadVectorToBuffer(scene.indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, m_indexBuffer, m_indexBufferMemory);
 
     std::vector<LeafInstance> trunkDummyInstance = {
-        { glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, glm::vec3(1.0f), 0.0f }
+            { glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, glm::vec3(1.0f), 0.0f, 0 }
     };
     uploadVectorToBuffer(trunkDummyInstance, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_trunkInstanceBuffer, m_trunkInstanceBufferMemory);
 
@@ -1154,10 +1169,14 @@ void Application::updateUniformBuffer(uint32_t currentImage) {
         const char* seasonNames[] = { "Spring", "Summer", "Autumn", "Winter" };
         int seasonIdx = static_cast<int>(std::floor(m_season)) % 4;
 
-        std::string title = m_title + " | " + seasonNames[seasonIdx]
+        const char* compassDirs[] = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
+        int compassIdx = static_cast<int>(std::round(m_windAngleDeg / 45.0f)) % 8;
+        if (compassIdx < 0) compassIdx += 8;
+
+        std::string title = m_treeParams.speciesName + " | " + seasonNames[seasonIdx]
+            + " | Wind: " + compassDirs[compassIdx] + " (" + std::to_string(static_cast<int>(m_windAngleDeg)) + " deg)"
             + " | Leaves: " + std::to_string(m_leafInstanceCount)
-            + " | " + std::to_string(static_cast<int>(fps)) + " FPS ("
-            + std::to_string(frameMs).substr(0, 4) + " ms)";
+            + " | " + std::to_string(static_cast<int>(fps)) + " FPS";
         glfwSetWindowTitle(m_window, title.c_str());
 
         m_frameCount = 0;
@@ -1186,6 +1205,9 @@ void Application::updateUniformBuffer(uint32_t currentImage) {
     ubo.season = m_season;
     ubo.time = time;
     ubo.windStrength = m_windStrength;
+
+    float windRad = glm::radians(m_windAngleDeg);
+    ubo.windDir = glm::vec2(std::cos(windRad), std::sin(windRad));
 
     std::memcpy(m_uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
@@ -1221,20 +1243,44 @@ void Application::processInput(float deltaTime) {
         m_cameraTargetZ = std::clamp(m_cameraTargetZ - 3.0f * deltaTime, -0.5f, 5.0f);
     }
 
-    // Single-press action hotkeys for tree regeneration, grove mode, and parameters
+    // Wind Compass Direction (Z/X) and Wind Strength (C/V)
+    if (glfwGetKey(m_window, GLFW_KEY_Z) == GLFW_PRESS) {
+        m_windAngleDeg = std::fmod(m_windAngleDeg - 60.0f * deltaTime + 360.0f, 360.0f);
+    }
+    if (glfwGetKey(m_window, GLFW_KEY_X) == GLFW_PRESS) {
+        m_windAngleDeg = std::fmod(m_windAngleDeg + 60.0f * deltaTime, 360.0f);
+    }
+    if (glfwGetKey(m_window, GLFW_KEY_C) == GLFW_PRESS) {
+        m_windStrength = std::clamp(m_windStrength - 1.0f * deltaTime, 0.0f, 3.0f);
+    }
+    if (glfwGetKey(m_window, GLFW_KEY_V) == GLFW_PRESS) {
+        m_windStrength = std::clamp(m_windStrength + 1.0f * deltaTime, 0.0f, 3.0f);
+    }
+
+    // Single-press action hotkeys for tree regeneration, species, grove mode, and parameters
     bool nDown = glfwGetKey(m_window, GLFW_KEY_N) == GLFW_PRESS;
+    bool tDown = glfwGetKey(m_window, GLFW_KEY_T) == GLFW_PRESS;
     bool gDown = glfwGetKey(m_window, GLFW_KEY_G) == GLFW_PRESS;
     bool lBracket = glfwGetKey(m_window, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS;
     bool rBracket = glfwGetKey(m_window, GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS;
     bool minusKey = glfwGetKey(m_window, GLFW_KEY_MINUS) == GLFW_PRESS;
     bool equalKey = glfwGetKey(m_window, GLFW_KEY_EQUAL) == GLFW_PRESS;
     bool oDown = glfwGetKey(m_window, GLFW_KEY_O) == GLFW_PRESS;
+    bool kDown = glfwGetKey(m_window, GLFW_KEY_K) == GLFW_PRESS;
+    bool lDown = glfwGetKey(m_window, GLFW_KEY_L) == GLFW_PRESS;
+    bool pDown = glfwGetKey(m_window, GLFW_KEY_P) == GLFW_PRESS;
 
-    if (nDown || gDown || lBracket || rBracket || minusKey || equalKey || oDown) {
+    if (nDown || tDown || gDown || lBracket || rBracket || minusKey || equalKey || oDown || kDown || lDown || pDown) {
         if (!m_actionKeyLatch) {
             m_actionKeyLatch = true;
             if (nDown) {
                 m_treeParams.seed += 1;
+                rebuildSceneBuffers();
+            }
+            else if (tDown) {
+                int nextSpecies = (static_cast<int>(m_treeParams.species) + 1) % static_cast<int>(TreeSpecies::Count);
+                m_treeParams = getSpeciesPreset(static_cast<TreeSpecies>(nextSpecies), m_treeParams.seed);
+                std::cout << "Switched species to: " << m_treeParams.speciesName << '\n';
                 rebuildSceneBuffers();
             }
             else if (gDown) {
@@ -1260,6 +1306,28 @@ void Application::processInput(float deltaTime) {
             }
             else if (oDown) {
                 m_autoOrbitCamera = !m_autoOrbitCamera;
+            }
+            else if (kDown) {
+                if (TreeSerializer::savePresetToFile("saved_tree.tree", m_treeParams)) {
+                    std::cout << "[Saved] Preset written to saved_tree.tree\n";
+                }
+            }
+            else if (lDown) {
+                TreeParameters loaded{};
+                if (TreeSerializer::loadPresetFromFile("saved_tree.tree", loaded)) {
+                    m_treeParams = loaded;
+                    std::cout << "[Loaded] Preset read from saved_tree.tree (" << m_treeParams.speciesName << ")\n";
+                    rebuildSceneBuffers();
+                }
+                else {
+                    std::cout << "[Load Failed] Could not read saved_tree.tree\n";
+                }
+            }
+            else if (pDown) {
+                TreeModel exportModel(m_treeParams);
+                if (TreeSerializer::exportTreeToObj("exported_tree.obj", exportModel, m_treeParams.radialSegments)) {
+                    std::cout << "[Exported] 3D mesh written to exported_tree.obj (ready for Unreal/Unity/Godot/Blender)\n";
+                }
             }
         }
     }
@@ -1607,9 +1675,12 @@ void Application::mainLoop() {
 
     std::cout << "\n=== Interactive Tree Viewer Controls ===\n"
         << "  [W/A/S/D] or [Arrows] : Orbit Camera  | [Q/E] Zoom | [R/F] Pan Height | [O] Toggle Auto-Orbit\n"
+        << "  [T]                   : Cycle Species (Oak -> Sakura -> Silver Birch -> Weeping Willow -> Scots Pine)\n"
         << "  [1/2/3/4]             : Seasons       | [Space] Toggle Auto-Season Cycle\n"
-        << "  [N]                   : New Tree Seed | [G] Toggle 5-Tree Forest Grove\n"
-        << "  [ / ]                 : Branch Angle  | [- / =] Decrease/Increase Leaf Density\n\n";
+        << "  [Z / X]               : Wind Compass  | [C / V] Decrease/Increase Wind Strength\n"
+        << "  [N]                   : New Tree Seed | [G] Toggle 5-Species Botanical Grove\n"
+        << "  [ / ]                 : Branch Angle  | [- / =] Decrease/Increase Leaf Density\n"
+        << "  [K] Save Preset       | [L] Load Preset | [P] Export 3D .obj Mesh for Game Engines\n\n";
 
     while (!glfwWindowShouldClose(m_window)) {
         glfwPollEvents();

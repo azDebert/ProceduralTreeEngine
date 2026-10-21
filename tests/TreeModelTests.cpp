@@ -1,4 +1,5 @@
 #include "../src/TreeModel.h"
+#include "../src/TreeSerializer.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -142,12 +143,54 @@ namespace {
     }
 }
 
+bool testSerialisationAndBoundsChecking() {
+    TreeParameters original = getSpeciesPreset(TreeSpecies::WeepingWillow, 777);
+    original.branchAngle = 52.0f;
+    original.leavesPerTwig = 24;
+
+    std::string text = TreeSerializer::serialiseToString(original);
+    TreeParameters loaded{};
+    if (!TreeSerializer::deserialiseFromString(text, loaded)) {
+        std::cerr << "[FAIL] testSerialisation: Failed to deserialise valid preset string.\n";
+        return false;
+    }
+
+    if (loaded.seed != 777 || loaded.species != TreeSpecies::WeepingWillow ||
+        std::abs(loaded.branchAngle - 52.0f) > 0.01f || loaded.leavesPerTwig != 24) {
+        std::cerr << "[FAIL] testSerialisation: Round-trip values did not match original.\n";
+        return false;
+    }
+
+    // Test hostile / out-of-bounds values to ensure parser clamps them safely
+    std::string hostileInput =
+        "seed=99\n"
+        "recursionDepth=999999\n"
+        "trunkRadius=-50.0\n"
+        "leavesPerTwig=500000\n"
+        "branchAngle=not_a_number\n";
+
+    TreeParameters clamped{};
+    if (!TreeSerializer::deserialiseFromString(hostileInput, clamped)) {
+        std::cerr << "[FAIL] testSerialisation: Failed to handle hostile input string.\n";
+        return false;
+    }
+
+    if (clamped.recursionDepth > 7 || clamped.trunkRadius <= 0.0f || clamped.leavesPerTwig > 50) {
+        std::cerr << "[FAIL] testSerialisation: Bounds check failed to clamp hostile values!\n";
+        return false;
+    }
+
+    std::cout << "[PASS] testSerialisationAndBoundsChecking (Round-trip and safe clamping verified)\n";
+    return true;
+}
+
 int main() {
     std::cout << "Running Procedural Tree Model unit tests...\n";
 
     bool allPassed = true;
     allPassed = testValidGeometry() && allPassed;
     allPassed = testDeterministicSeeds() && allPassed;
+    allPassed = testSerialisationAndBoundsChecking() && allPassed;
 
     if (!allPassed) {
         std::cerr << "Some tests FAILED!\n";

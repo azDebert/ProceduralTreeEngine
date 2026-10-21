@@ -39,9 +39,9 @@ struct Vertex {
         return bindings;
     }
 
-    // Describes how Vertex (locations 0..2) and LeafInstance (locations 3..8) map to the vertex shader
-    static std::array<VkVertexInputAttributeDescription, 9> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 9> attributes{};
+    // Describes how Vertex (locations 0..2) and LeafInstance (locations 3..9) map to the vertex shader
+    static std::array<VkVertexInputAttributeDescription, 10> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 10> attributes{};
 
         // --- Binding 0: Per-Vertex Attributes ---
         attributes[0] = { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos) };
@@ -55,6 +55,7 @@ struct Vertex {
         attributes[6] = { 6, 1, VK_FORMAT_R32_SFLOAT,       offsetof(LeafInstance, scale) };
         attributes[7] = { 7, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, color) };
         attributes[8] = { 8, 1, VK_FORMAT_R32_SFLOAT,       offsetof(LeafInstance, phase) };
+        attributes[9] = { 9, 1, VK_FORMAT_R32_SINT,         offsetof(LeafInstance, speciesType) };
 
         return attributes;
     }
@@ -68,6 +69,7 @@ struct UniformBufferObject {
     alignas(4) float season;
     alignas(4) float time;
     alignas(4) float windStrength;
+    alignas(8) glm::vec2 windDir;
 };
 
 // Holds the queue family indices supported by GPU
@@ -244,7 +246,8 @@ private:
     bool m_autoOrbitCamera = true;
 
     // Interactive tree, wind, and grove state
-    TreeParameters m_treeParams{};
+    TreeParameters m_treeParams = getSpeciesPreset(TreeSpecies::EnglishOak, 42);
+    float m_windAngleDeg = 45.0f;   // Wind compass direction in degrees (0=N, 90=E, 180=S, 270=W)
     bool m_forestGroveMode = false; // Toggle between 1 tree and a 5-tree grove
     float m_windStrength = 1.0f;
     bool m_actionKeyLatch = false;
