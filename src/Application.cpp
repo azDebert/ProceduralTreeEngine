@@ -15,31 +15,147 @@ namespace {
     // Allow CPU to work on 2 frames ahead of the GPU
     constexpr int kMaxFramesInFlight = 2;
 
+    // Builds the 5 species-specific 3D foliage meshes + 1 wind streak mesh into a single vertex/index catalogue
+    struct FoliageMeshCatalogue {
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indices;
+        std::array<FoliageDrawBatch, 6> meshRanges{};
+    };
+
+    FoliageMeshCatalogue buildFoliageMeshCatalogue() {
+        FoliageMeshCatalogue cat;
+
+        auto appendMesh = [&](int typeIdx, const std::vector<Vertex>& verts, const std::vector<uint32_t>& inds) {
+            FoliageDrawBatch batch{};
+            batch.vertexOffset = static_cast<int32_t>(cat.vertices.size());
+            batch.firstIndex = static_cast<uint32_t>(cat.indices.size());
+            batch.indexCount = static_cast<uint32_t>(inds.size());
+            cat.meshRanges[typeIdx] = batch;
+
+            cat.vertices.insert(cat.vertices.end(), verts.begin(), verts.end());
+            cat.indices.insert(cat.indices.end(), inds.begin(), inds.end());
+            };
+
+        // 0: English Oak — 9-vertex V-folded lobed broadleaf
+        appendMesh(0, {
+            { { 0.00f, 0.00f,  0.00f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.0f, 1.00f }, 0.0f }, // 0: Stem base
+            { { 0.00f, 0.45f, -0.04f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.0f, 1.00f }, 0.0f }, // 1: Midrib centre crease
+            { { 0.00f, 1.02f, -0.08f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.0f, 1.00f }, 0.0f }, // 2: Rounded apex tip
+            { { -0.32f, 0.25f,  0.06f },{ 1.0f, 1.0f, 1.0f },{ -0.35f, 0.0f, 0.94f }, 0.0f }, // 3: Lower-left lobe
+            { { -0.18f, 0.48f,  0.02f },{ 1.0f, 1.0f, 1.0f },{ -0.35f, 0.0f, 0.94f }, 0.0f }, // 4: Left sinus indentation
+            { { -0.44f, 0.72f,  0.08f },{ 1.0f, 1.0f, 1.0f },{ -0.35f, 0.0f, 0.94f }, 0.0f }, // 5: Upper-left wide lobe
+            { { 0.32f, 0.25f,  0.06f },{ 1.0f, 1.0f, 1.0f },{ 0.35f, 0.0f, 0.94f }, 0.0f }, // 6: Lower-right lobe
+            { { 0.18f, 0.48f,  0.02f },{ 1.0f, 1.0f, 1.0f },{ 0.35f, 0.0f, 0.94f }, 0.0f }, // 7: Right sinus indentation
+            { { 0.44f, 0.72f,  0.08f },{ 1.0f, 1.0f, 1.0f },{ 0.35f, 0.0f, 0.94f }, 0.0f }  // 8: Upper-right wide lobe
+            }, {
+                0, 3, 1,  3, 4, 1,  4, 5, 1,  5, 2, 1,
+                0, 1, 6,  1, 7, 6,  1, 8, 7,  1, 2, 8
+            });
+
+        // 1: Japanese Sakura — 7-vertex cupped blossom / folded ovate leaf
+        appendMesh(1, {
+            { { 0.00f, 0.00f,  0.00f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.0f, 1.00f }, 0.0f },
+            { { 0.00f, 0.50f, -0.05f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.0f, 1.00f }, 0.0f },
+            { { -0.38f, 0.32f,  0.07f },{ 1.0f, 1.0f, 1.0f },{ -0.30f, 0.0f, 0.95f }, 0.0f },
+            { { -0.34f, 0.78f,  0.06f },{ 1.0f, 1.0f, 1.0f },{ -0.30f, 0.0f, 0.95f }, 0.0f },
+            { { 0.00f, 1.04f,  0.02f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.0f, 1.00f }, 0.0f },
+            { { 0.34f, 0.78f,  0.06f },{ 1.0f, 1.0f, 1.0f },{ 0.30f, 0.0f, 0.95f }, 0.0f },
+            { { 0.38f, 0.32f,  0.07f },{ 1.0f, 1.0f, 1.0f },{ 0.30f, 0.0f, 0.95f }, 0.0f }
+            }, {
+                0, 2, 1,  2, 3, 1,  3, 4, 1,
+                0, 1, 6,  1, 5, 6,  1, 4, 5
+            });
+
+         // 2: Silver Birch — 6-vertex folded deltoid (triangular-diamond) leaf with arched tip
+         appendMesh(2, {
+            { { 0.00f, 0.00f,  0.02f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.0f, 1.00f }, 0.0f },
+            { { 0.00f, 0.42f,  0.00f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.0f, 1.00f }, 0.0f },
+            { { 0.00f, 1.05f, -0.12f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.2f, 0.98f }, 0.0f },
+            { { -0.42f, 0.28f,  0.06f },{ 1.0f, 1.0f, 1.0f },{ -0.35f, 0.0f, 0.94f }, 0.0f },
+            { { 0.42f, 0.28f,  0.06f },{ 1.0f, 1.0f, 1.0f },{ 0.35f, 0.0f, 0.94f }, 0.0f },
+            { { 0.00f, 0.72f, -0.04f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.0f, 1.00f }, 0.0f }
+            }, {
+                0, 3, 1,  3, 2, 1,
+                0, 1, 4,  1, 2, 4
+            });
+
+          // 3: Weeping Willow — 7-vertex long slender curved lanceolate blade (5:1 length-to-width)
+          appendMesh(3, {
+            { { 0.00f, 0.00f,  0.00f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.0f, 1.00f }, 0.0f },
+            { { -0.14f, 0.35f,  0.03f },{ 1.0f, 1.0f, 1.0f },{ -0.25f, 0.0f, 0.97f }, 0.0f },
+            { { 0.14f, 0.35f,  0.03f },{ 1.0f, 1.0f, 1.0f },{ 0.25f, 0.0f, 0.97f }, 0.0f },
+            { { 0.00f, 0.55f, -0.02f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.0f, 1.00f }, 0.0f },
+            { { -0.12f, 0.95f, -0.08f },{ 1.0f, 1.0f, 1.0f },{ -0.25f, 0.0f, 0.97f }, 0.0f },
+            { { 0.12f, 0.95f, -0.08f },{ 1.0f, 1.0f, 1.0f },{ 0.25f, 0.0f, 0.97f }, 0.0f },
+            { { 0.00f, 1.55f, -0.22f },{ 1.0f, 1.0f, 1.0f },{ 0.00f, 0.2f, 0.98f }, 0.0f }
+            }, {
+                0, 1, 3,  0, 3, 2,
+                1, 4, 3,  3, 5, 2,
+                4, 6, 3,  3, 6, 5
+            });
+
+           // 4: Scots Pine — 18-vertex 3D starburst fascicle of 6 crossed slender pine needles
+           std::vector<Vertex> pineVerts;
+           std::vector<uint32_t> pineInds;
+           const glm::vec3 needleDirs[6] = {
+                glm::normalize(glm::vec3(0.45f, 0.85f,  0.35f)),
+                glm::normalize(glm::vec3(-0.45f, 0.85f,  0.35f)),
+                glm::normalize(glm::vec3(0.00f, 0.92f,  0.55f)),
+                glm::normalize(glm::vec3(0.55f, 0.70f, -0.25f)),
+                glm::normalize(glm::vec3(-0.55f, 0.70f, -0.25f)),
+                glm::normalize(glm::vec3(0.00f, 0.80f, -0.45f))
+           };
+           for (int n = 0; n < 6; ++n) {
+               uint32_t b = static_cast<uint32_t>(pineVerts.size());
+               glm::vec3 d = needleDirs[n];
+               glm::vec3 side = glm::normalize(glm::cross(d, glm::vec3(0.0f, 0.0f, 1.0f)));
+               glm::vec3 norm = glm::normalize(glm::cross(side, d));
+               float w = 0.045f; // Very thin pine needle width
+               pineVerts.push_back({ -side * w,{ 1.0f, 1.0f, 1.0f }, norm, 0.0f });
+               pineVerts.push_back({ side * w,{ 1.0f, 1.0f, 1.0f }, norm, 0.0f });
+               pineVerts.push_back({ d * 1.15f,{ 1.0f, 1.0f, 1.0f }, norm, 0.0f });
+               pineInds.push_back(b);
+               pineInds.push_back(b + 1);
+               pineInds.push_back(b + 2);
+           }
+           appendMesh(4, pineVerts, pineInds);
+           
+           // 5: Wind Streak Ribbon — 4-vertex elongated ribbon
+           appendMesh(5, {
+               { { 0.0f, -0.5f, 0.0f },{ 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 1.0f }, 0.0f },
+               { { -0.5f,  0.0f, 0.0f },{ 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 1.0f }, 0.0f },
+               { { 0.0f,  0.5f, 0.0f },{ 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 1.0f }, 0.0f },
+               { { 0.5f,  0.0f, 0.0f },{ 1.0f, 1.0f, 1.0f },{ 0.0f, 0.0f, 1.0f }, 0.0f }
+               }, { 0, 1, 2,  0, 2, 3 });
+           return cat;
+    }
+
     struct SceneGeometry {
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
         std::vector<LeafInstance> leaves;
+        std::vector<FoliageDrawBatch> batches;
     };
 
-    // Builds the ground plane and 1 or more procedural trees in world space
-    SceneGeometry buildSceneGeometry(const TreeParameters& baseParams, bool forestGrove) {
+    SceneGeometry buildSceneGeometry(const TreeParameters& baseParams, bool forestGrove, const FoliageMeshCatalogue& catalogue) {
         SceneGeometry scene;
 
-        // Add an octagonal ground plane at Z = -1.0f so trees stand on solid earth
-        const float groundRadius = forestGrove ? 7.5f : 3.5f;
+        // Octagonal ground plane at Z = -1.0f
+        const float groundRadius = forestGrove ? 8.0f : 3.8f;
         const int groundSides = 24;
         const glm::vec3 groundColor(0.22f, 0.28f, 0.18f);
         const glm::vec3 upNormal(0.0f, 0.0f, 1.0f);
 
         uint32_t centerIdx = static_cast<uint32_t>(scene.vertices.size());
-        scene.vertices.push_back({ { 0.0f, 0.0f, -1.0f }, groundColor, upNormal });
+        scene.vertices.push_back({ { 0.0f, 0.0f, -1.0f }, groundColor, upNormal, 0.0f });
 
         for (int i = 0; i <= groundSides; ++i) {
             float angle = static_cast<float>(i) / static_cast<float>(groundSides) * 2.0f * glm::pi<float>();
             scene.vertices.push_back({
                 { std::cos(angle) * groundRadius, std::sin(angle) * groundRadius, -1.0f },
                 groundColor * 0.85f,
-                upNormal
+                upNormal,
+                0.0f
                 });
         }
 
@@ -49,28 +165,61 @@ namespace {
             scene.indices.push_back(centerIdx + 1 + static_cast<uint32_t>(i + 1));
         }
 
-        // Define tree placements (1 centre tree, or 5 trees in a grove)
-        std::vector<glm::vec3> treeOffsets = { glm::vec3(0.0f, 0.0f, 0.0f) };
-        if (forestGrove) {
-            treeOffsets.push_back(glm::vec3(-3.2f, -1.8f, 0.0f));
-            treeOffsets.push_back(glm::vec3(3.2f, -1.6f, 0.0f));
-            treeOffsets.push_back(glm::vec3(-2.4f, 2.8f, 0.0f));
-            treeOffsets.push_back(glm::vec3(2.6f, 2.5f, 0.0f));
+        // Add 3D Wind Compass Ring & Rotating Arrow at (0.0, -3.1, -0.97)
+        const glm::vec2 compassCenter(0.0f, -3.1f);
+        const float compassZ = -0.97f;
+        uint32_t arrowBase = static_cast<uint32_t>(scene.vertices.size());
+        const glm::vec3 arrowColor(0.95f, 0.38f, 0.15f);
+        const glm::vec3 tailColor(0.25f, 0.65f, 0.92f);
+
+        // Arrow shaft & head pointing along +X in local space (rotated by ubo.windDir in vertex shader via flex = -1.0f)
+        scene.vertices.push_back({ { compassCenter.x - 0.42f, compassCenter.y - 0.05f, compassZ }, tailColor,  upNormal, -1.0f });
+        scene.vertices.push_back({ { compassCenter.x + 0.15f, compassCenter.y - 0.05f, compassZ }, arrowColor, upNormal, -1.0f });
+        scene.vertices.push_back({ { compassCenter.x + 0.15f, compassCenter.y + 0.05f, compassZ }, arrowColor, upNormal, -1.0f });
+        scene.vertices.push_back({ { compassCenter.x - 0.42f, compassCenter.y + 0.05f, compassZ }, tailColor,  upNormal, -1.0f });
+        scene.vertices.push_back({ { compassCenter.x + 0.15f, compassCenter.y - 0.18f, compassZ }, arrowColor, upNormal, -1.0f });
+        scene.vertices.push_back({ { compassCenter.x + 0.52f, compassCenter.y,         compassZ }, arrowColor, upNormal, -1.0f });
+        scene.vertices.push_back({ { compassCenter.x + 0.15f, compassCenter.y + 0.18f, compassZ }, arrowColor, upNormal, -1.0f });
+
+        uint32_t arrowInds[] = { 0, 1, 2,  0, 2, 3,  4, 5, 6 };
+        for (uint32_t idx : arrowInds) {
+            scene.indices.push_back(arrowBase + idx);
         }
 
-        int radialSegments = baseParams.radialSegments;
+        // Generate 1 tree or a 5-species grove
+        std::vector<glm::vec3> treeOffsets = { glm::vec3(0.0f, 0.0f, 0.0f) };
+        if (forestGrove) {
+            treeOffsets.push_back(glm::vec3(-3.4f, -1.8f, 0.0f));
+            treeOffsets.push_back(glm::vec3(3.4f, -1.6f, 0.0f));
+            treeOffsets.push_back(glm::vec3(-2.6f, 2.9f, 0.0f));
+            treeOffsets.push_back(glm::vec3(2.8f, 2.7f, 0.0f));
+        }
+
+        // Calculate proportional adjustments from baseParams so [- / =] and [ / ] update ALL trees in the grove
+        TreeParameters defaultActivePreset = getSpeciesPreset(baseParams.species, baseParams.seed);
+        float leafDensityScale = (defaultActivePreset.leavesPerTwig > 0)
+            ? static_cast<float>(baseParams.leavesPerTwig) / static_cast<float>(defaultActivePreset.leavesPerTwig)
+            : 1.0f;
+        float branchAngleDelta = baseParams.branchAngle - defaultActivePreset.branchAngle;
+
+        std::array<std::vector<LeafInstance>, 6> leavesBySpecies;
 
         for (size_t t = 0; t < treeOffsets.size(); ++t) {
-            // In 5-tree grove mode, showcase all 5 botanical species side-by-side (or variations)
-            TreeParameters params = (forestGrove && t > 0)
-                ? getSpeciesPreset(static_cast<TreeSpecies>(t % static_cast<size_t>(TreeSpecies::Count)), baseParams.seed + static_cast<uint32_t>(t * 101))
-                : baseParams;
+            TreeParameters params = baseParams;
+            if (forestGrove && t > 0) {
+                TreeSpecies sp = static_cast<TreeSpecies>(t % static_cast<size_t>(TreeSpecies::Count));
+                params = getSpeciesPreset(sp, baseParams.seed + static_cast<uint32_t>(t * 101));
+                params.leavesPerTwig = std::clamp(
+                    static_cast<int>(std::round(static_cast<float>(params.leavesPerTwig) * leafDensityScale)),
+                    0, 50
+                );
+                params.branchAngle = std::clamp(params.branchAngle + branchAngleDelta, 10.0f, 80.0f);
+            }
+
             int radialSegments = params.radialSegments;
             TreeModel tree(params);
-
             glm::vec3 worldOffset = treeOffsets[t];
 
-            // Append branch cylinder meshes
             for (const auto& seg : tree.getSegments()) {
                 glm::vec3 dir = seg.end - seg.start;
                 float length = glm::length(dir);
@@ -90,23 +239,24 @@ namespace {
                     float theta = static_cast<float>(i) / static_cast<float>(radialSegments) * 2.0f * glm::pi<float>();
                     glm::vec3 normal = glm::normalize(perp1 * std::cos(theta) + perp2 * std::sin(theta));
 
-                    // Add natural bark shading (and dark horizontal lenticel bands for Silver Birch)
                     glm::vec3 startBark = seg.barkColor * 0.90f;
                     glm::vec3 endBark = seg.barkColor * 1.08f;
                     if (params.species == TreeSpecies::SilverBirch && std::sin(seg.start.z * 14.0f) > 0.65f) {
-                        startBark *= 0.35f;
+                        startBark *= 0.32f;
                     }
 
                     scene.vertices.push_back({
                         seg.start + worldOffset + normal * seg.startRadius,
                         startBark,
-                        normal
+                        normal,
+                        seg.startFlex
                         });
 
                     scene.vertices.push_back({
                         seg.end + worldOffset + normal * seg.endRadius,
                         endBark,
-                        normal
+                        normal,
+                        seg.endFlex
                         });
                 }
 
@@ -126,32 +276,46 @@ namespace {
                 }
             }
 
-            // Give each tree in the grove a slight seasonal offset so some trees turn autumn orange earlier than others
-            float treePhaseShift = static_cast<float>(t) * 0.14f;
+            // Stagger tree seasonal phase slightly in grove mode so some trees shift colour earlier than others
+            float treePhaseShift = static_cast<float>(t) * 0.16f;
             for (auto leaf : tree.getLeaves()) {
                 leaf.position += worldOffset;
-                float baseBucket = std::floor(leaf.phase); // Preserve 0.0 (Deciduous), 1.0 (Sakura), 2.0 (Evergreen)
-                float fracPhase = std::fmod(leaf.phase - baseBucket + treePhaseShift, 0.99f);
-                leaf.phase = baseBucket + fracPhase;
-                scene.leaves.push_back(leaf);
+                leaf.phase = std::fmod(leaf.phase + treePhaseShift, 0.99f);
+                int bucket = std::clamp(leaf.speciesType, 0, 4);
+                leavesBySpecies[bucket].push_back(leaf);
             }
+        }
+
+        // Add 28 visible 3D wind streak ribbons across the airspace
+        std::mt19937 windRng(1337);
+        std::uniform_real_distribution<float> xyDist(-4.5f, 4.5f);
+        std::uniform_real_distribution<float> zDist(0.2f, 3.4f);
+        std::uniform_real_distribution<float> pDist(0.0f, 1.0f);
+        for (int i = 0; i < 28; ++i) {
+            leavesBySpecies[5].push_back({
+                glm::vec3(xyDist(windRng), xyDist(windRng), zDist(windRng)),
+                glm::vec3(1.0f, 0.0f, 0.0f),
+                glm::vec3(0.0f, 0.0f, 1.0f),
+                1.0f,
+                glm::vec3(0.85f, 0.92f, 1.0f),
+                pDist(windRng),
+                5,
+                0.0f
+                });
+        }
+
+        // Pack sorted instances into scene.leaves and record per-species draw batches
+        for (size_t s = 0; s < leavesBySpecies.size(); ++s) {
+            if (leavesBySpecies[s].empty()) continue;
+            FoliageDrawBatch batch = catalogue.meshRanges[s];
+            batch.firstInstance = static_cast<uint32_t>(scene.leaves.size());
+            batch.instanceCount = static_cast<uint32_t>(leavesBySpecies[s].size());
+            scene.batches.push_back(batch);
+            scene.leaves.insert(scene.leaves.end(), leavesBySpecies[s].begin(), leavesBySpecies[s].end());
         }
 
         return scene;
     }
-
-    // Standard 4-vertex diamond leaf blade mesh in local space (grows along +Y, width along X, slight arch in Z)
-    const std::vector<Vertex> kLeafVertices = {
-        { { 0.00f, 0.00f,  0.00f },{ 0.2f, 0.6f, 0.2f },{ 0.0f, 0.0f, 1.0f } }, // 0: Stem base
-        { { -0.35f, 0.45f,  0.05f },{ 0.2f, 0.6f, 0.2f },{ 0.0f, 0.0f, 1.0f } }, // 1: Left widest point
-        { { 0.00f, 1.00f, -0.05f },{ 0.2f, 0.6f, 0.2f },{ 0.0f, 0.0f, 1.0f } }, // 2: Leaf tip
-        { { 0.35f, 0.45f,  0.05f },{ 0.2f, 0.6f, 0.2f },{ 0.0f, 0.0f, 1.0f } }  // 3: Right widest point
-    };
-
-    const std::vector<uint32_t> kLeafIndices = {
-        0, 1, 2,
-        0, 2, 3
-    };
 
     // Validation layer used for catching Vulkan bugs
     const std::vector<const char*> kValidationLayers = {
@@ -988,6 +1152,7 @@ VkImageView Application::createImageView(
 
     return imageView;
 }
+
 void Application::createSceneBuffers() {
     auto uploadVectorToBuffer = [this](const auto& vec, VkBufferUsageFlags usage, VkBuffer& dstBuffer, VkDeviceMemory& dstMemory) {
         VkDeviceSize size = sizeof(vec[0]) * vec.size();
@@ -1021,20 +1186,22 @@ void Application::createSceneBuffers() {
         vkFreeMemory(m_device, stagingMemory, nullptr);
         };
 
-    SceneGeometry scene = buildSceneGeometry(m_treeParams, m_forestGroveMode);
+    FoliageMeshCatalogue catalogue = buildFoliageMeshCatalogue();
+    SceneGeometry scene = buildSceneGeometry(m_treeParams, m_forestGroveMode, catalogue);
     m_indexCount = static_cast<uint32_t>(scene.indices.size());
     m_leafInstanceCount = static_cast<uint32_t>(scene.leaves.size());
+    m_foliageBatches = scene.batches;
 
     uploadVectorToBuffer(scene.vertices, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_vertexBuffer, m_vertexBufferMemory);
     uploadVectorToBuffer(scene.indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, m_indexBuffer, m_indexBufferMemory);
 
     std::vector<LeafInstance> trunkDummyInstance = {
-            { glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, glm::vec3(1.0f), 0.0f, 0 }
+        { glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), 0.0f, glm::vec3(1.0f), 0.0f, 0, 0.0f }
     };
     uploadVectorToBuffer(trunkDummyInstance, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_trunkInstanceBuffer, m_trunkInstanceBufferMemory);
 
-    uploadVectorToBuffer(kLeafVertices, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_leafVertexBuffer, m_leafVertexBufferMemory);
-    uploadVectorToBuffer(kLeafIndices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, m_leafIndexBuffer, m_leafIndexBufferMemory);
+    uploadVectorToBuffer(catalogue.vertices, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_leafVertexBuffer, m_leafVertexBufferMemory);
+    uploadVectorToBuffer(catalogue.indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, m_leafIndexBuffer, m_leafIndexBufferMemory);
 
     if (m_leafInstanceCount > 0) {
         uploadVectorToBuffer(scene.leaves, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, m_leafInstanceBuffer, m_leafInstanceBufferMemory);
@@ -1042,8 +1209,9 @@ void Application::createSceneBuffers() {
 
     std::cout << "Scene built: " << (m_forestGroveMode ? 5 : 1) << " tree(s) | "
         << scene.vertices.size() << " branch verts | "
-        << m_leafInstanceCount << " instanced leaves | Seed: " << m_treeParams.seed << '\n';
+        << m_leafInstanceCount << " 3D foliage instances | Seed: " << m_treeParams.seed << '\n';
 }
+
 
 void Application::destroySceneBuffers() {
     auto destroyBufferPair = [this](VkBuffer& buf, VkDeviceMemory& mem) {
@@ -1078,7 +1246,7 @@ void Application::createUniformBuffers() {
     m_uniformBuffersMemory.resize(kMaxFramesInFlight);
     m_uniformBuffersMapped.resize(kMaxFramesInFlight);
 
-    for (size_t i = 0; i < kMaxFramesInFlight; ++i) {
+    for (size_t i = 0; i < kMaxFramesInFlight; i++) {
         createBuffer(
             bufferSize,
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -1087,7 +1255,6 @@ void Application::createUniformBuffers() {
             m_uniformBuffersMemory[i]
         );
 
-        // Keep the uniform buffer persistently mapped across the lifetime of the application
         vkMapMemory(m_device, m_uniformBuffersMemory[i], 0, bufferSize, 0, &m_uniformBuffersMapped[i]);
     }
 }
@@ -1122,8 +1289,7 @@ void Application::createDescriptorSets() {
         throw std::runtime_error("Failed to allocate descriptor sets!");
     }
 
-    // Point each descriptor set at its corresponding per frame uniform buffer
-    for (size_t i = 0; i < kMaxFramesInFlight; ++i) {
+    for (size_t i = 0; i < kMaxFramesInFlight; i++) {
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = m_uniformBuffers[i];
         bufferInfo.offset = 0;
@@ -1139,6 +1305,208 @@ void Application::createDescriptorSets() {
         descriptorWrite.pBufferInfo = &bufferInfo;
 
         vkUpdateDescriptorSets(m_device, 1, &descriptorWrite, 0, nullptr);
+    }
+}
+
+void Application::createBuffer(
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags properties,
+    VkBuffer& buffer,
+    VkDeviceMemory& bufferMemory
+) const {
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create buffer!");
+    }
+
+    VkMemoryRequirements memRequirements{};
+    vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+
+    if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate buffer memory!");
+    }
+
+    vkBindBufferMemory(m_device, buffer, bufferMemory, 0);
+}
+
+void Application::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = m_commandPool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = size;
+    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+    vkEndCommandBuffer(commandBuffer);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(m_graphicsQueue);
+
+    vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
+}
+
+uint32_t Application::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const {
+    VkPhysicalDeviceMemoryProperties memProperties{};
+    vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
+
+    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+        if ((typeFilter & (1 << i)) &&
+            (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+
+    throw std::runtime_error("Failed to find suitable memory type!");
+}
+
+void Application::createCommandBuffers() {
+    m_commandBuffers.resize(kMaxFramesInFlight);
+
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = m_commandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = static_cast<uint32_t>(m_commandBuffers.size());
+
+    if (vkAllocateCommandBuffers(m_device, &allocInfo, m_commandBuffers.data()) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate command buffers!");
+    }
+}
+
+void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) const {
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to begin recording command buffer!");
+    }
+
+    VkRenderPassBeginInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass = m_renderPass;
+    renderPassInfo.framebuffer = m_swapChainFramebuffers[imageIndex];
+    renderPassInfo.renderArea.offset = { 0, 0 };
+    renderPassInfo.renderArea.extent = m_swapChainExtent;
+
+    std::array<VkClearValue, 2> clearValues{};
+    clearValues[0].color = { { 0.08f, 0.11f, 0.16f, 1.0f } };
+    clearValues[1].depthStencil = { 1.0f, 0 };
+
+    renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    renderPassInfo.pClearValues = clearValues.data();
+
+    vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(m_swapChainExtent.width);
+    viewport.height = static_cast<float>(m_swapChainExtent.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset = { 0, 0 };
+    scissor.extent = m_swapChainExtent;
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+    vkCmdBindDescriptorSets(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        m_pipelineLayout,
+        0, 1,
+        &m_descriptorSets[m_currentFrame],
+        0, nullptr
+    );
+
+    // Draw the ground plane, 3D wind compass arrow, and tree branch skeletons
+    VkBuffer trunkBuffers[] = { m_vertexBuffer, m_trunkInstanceBuffer };
+    VkDeviceSize offsets[] = { 0, 0 };
+    vkCmdBindVertexBuffers(commandBuffer, 0, 2, trunkBuffers, offsets);
+    vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(commandBuffer, m_indexCount, 1, 0, 0, 0);
+
+    // Draw each species' 3D foliage mesh (lobed oak leaf, sakura blossom, birch leaf, willow blade, 3D pine needles, wind streaks)
+    if (m_leafInstanceCount > 0 && !m_foliageBatches.empty()) {
+        VkBuffer leafBuffers[] = { m_leafVertexBuffer, m_leafInstanceBuffer };
+        vkCmdBindVertexBuffers(commandBuffer, 0, 2, leafBuffers, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, m_leafIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+        for (const auto& batch : m_foliageBatches) {
+            vkCmdDrawIndexed(
+                commandBuffer,
+                batch.indexCount,
+                batch.instanceCount,
+                batch.firstIndex,
+                batch.vertexOffset,
+                batch.firstInstance
+            );
+        }
+    }
+
+    vkCmdEndRenderPass(commandBuffer);
+
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to record command buffer!");
+    }
+}
+
+void Application::createSyncObjects() {
+    m_imageAvailableSemaphores.resize(kMaxFramesInFlight);
+    m_renderFinishedSemaphores.resize(m_swapChainImages.size());
+    m_inFlightFences.resize(kMaxFramesInFlight);
+
+    VkSemaphoreCreateInfo semaphoreInfo{};
+    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    // Start fences in the signalled state so the very first frame doesn't wait forever
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    for (size_t i = 0; i < kMaxFramesInFlight; ++i) {
+        if (vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]) != VK_SUCCESS ||
+            vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFences[i]) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create frame synchronisation objects!");
+        }
+    }
+
+    for (size_t i = 0; i < m_swapChainImages.size(); ++i) {
+        if (vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_renderFinishedSemaphores[i]) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create render-finished semaphores!");
+        }
     }
 }
 
@@ -1160,12 +1528,10 @@ void Application::updateUniformBuffer(uint32_t currentImage) {
         m_cameraYaw += deltaTime * 25.0f;
     }
 
-    // Update performance profiling in the window title bar every 0.5 seconds
     m_frameCount++;
     m_fpsTimer += deltaTime;
     if (m_fpsTimer >= 0.5f) {
         float fps = static_cast<float>(m_frameCount) / m_fpsTimer;
-        float frameMs = 1000.0f / std::max(fps, 1.0f);
         const char* seasonNames[] = { "Spring", "Summer", "Autumn", "Winter" };
         int seasonIdx = static_cast<int>(std::floor(m_season)) % 4;
 
@@ -1186,7 +1552,6 @@ void Application::updateUniformBuffer(uint32_t currentImage) {
     UniformBufferObject ubo{};
     ubo.model = glm::mat4(1.0f);
 
-    // Spherical orbit camera calculation
     float yawRad = glm::radians(m_cameraYaw);
     float pitchRad = glm::radians(m_cameraPitch);
     glm::vec3 target(0.0f, 0.0f, m_cameraTargetZ);
@@ -1205,7 +1570,6 @@ void Application::updateUniformBuffer(uint32_t currentImage) {
     ubo.season = m_season;
     ubo.time = time;
     ubo.windStrength = m_windStrength;
-
     float windRad = glm::radians(m_windAngleDeg);
     ubo.windDir = glm::vec2(std::cos(windRad), std::sin(windRad));
 
@@ -1213,7 +1577,6 @@ void Application::updateUniformBuffer(uint32_t currentImage) {
 }
 
 void Application::processInput(float deltaTime) {
-    // Camera Orbit (A/D or Left/Right for Yaw, W/S or Up/Down for Pitch)
     if (glfwGetKey(m_window, GLFW_KEY_A) == GLFW_PRESS || glfwGetKey(m_window, GLFW_KEY_LEFT) == GLFW_PRESS) {
         m_cameraYaw -= 65.0f * deltaTime;
         m_autoOrbitCamera = false;
@@ -1229,7 +1592,6 @@ void Application::processInput(float deltaTime) {
         m_cameraPitch = std::clamp(m_cameraPitch - 45.0f * deltaTime, -5.0f, 80.0f);
     }
 
-    // Camera Zoom (Q/E) and Vertical Pan (R/F)
     if (glfwGetKey(m_window, GLFW_KEY_Q) == GLFW_PRESS) {
         m_cameraDistance = std::clamp(m_cameraDistance - 6.0f * deltaTime, 2.0f, 25.0f);
     }
@@ -1243,7 +1605,6 @@ void Application::processInput(float deltaTime) {
         m_cameraTargetZ = std::clamp(m_cameraTargetZ - 3.0f * deltaTime, -0.5f, 5.0f);
     }
 
-    // Wind Compass Direction (Z/X) and Wind Strength (C/V)
     if (glfwGetKey(m_window, GLFW_KEY_Z) == GLFW_PRESS) {
         m_windAngleDeg = std::fmod(m_windAngleDeg - 60.0f * deltaTime + 360.0f, 360.0f);
     }
@@ -1257,7 +1618,6 @@ void Application::processInput(float deltaTime) {
         m_windStrength = std::clamp(m_windStrength + 1.0f * deltaTime, 0.0f, 3.0f);
     }
 
-    // Single-press action hotkeys for tree regeneration, species, grove mode, and parameters
     bool nDown = glfwGetKey(m_window, GLFW_KEY_N) == GLFW_PRESS;
     bool tDown = glfwGetKey(m_window, GLFW_KEY_T) == GLFW_PRESS;
     bool gDown = glfwGetKey(m_window, GLFW_KEY_G) == GLFW_PRESS;
@@ -1297,11 +1657,11 @@ void Application::processInput(float deltaTime) {
                 rebuildSceneBuffers();
             }
             else if (minusKey) {
-                m_treeParams.leavesPerTwig = std::clamp(m_treeParams.leavesPerTwig - 4, 0, 40);
+                m_treeParams.leavesPerTwig = std::clamp(m_treeParams.leavesPerTwig - 4, 0, 50);
                 rebuildSceneBuffers();
             }
             else if (equalKey) {
-                m_treeParams.leavesPerTwig = std::clamp(m_treeParams.leavesPerTwig + 4, 0, 40);
+                m_treeParams.leavesPerTwig = std::clamp(m_treeParams.leavesPerTwig + 4, 0, 50);
                 rebuildSceneBuffers();
             }
             else if (oDown) {
@@ -1333,208 +1693,6 @@ void Application::processInput(float deltaTime) {
     }
     else {
         m_actionKeyLatch = false;
-    }
-}
-
-void Application::createBuffer(
-    VkDeviceSize size,
-    VkBufferUsageFlags usage,
-    VkMemoryPropertyFlags properties,
-    VkBuffer& buffer,
-    VkDeviceMemory& bufferMemory
-) const {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create buffer!");
-    }
-
-    VkMemoryRequirements memRequirements{};
-    vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
-
-    if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate buffer memory!");
-    }
-
-    vkBindBufferMemory(m_device, buffer, bufferMemory, 0);
-}
-
-void Application::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const {
-    // Allocate a temporary one time command buffer from the command pool
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = m_commandPool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-    vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
-
-    // Begin recording a one time submit command buffer
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-    VkBufferCopy copyRegion{};
-    copyRegion.srcOffset = 0;
-    copyRegion.dstOffset = 0;
-    copyRegion.size = size;
-    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
-    vkEndCommandBuffer(commandBuffer);
-
-    // Submit the copy command to the graphics queue and wait for it to finish
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(m_graphicsQueue);
-
-    // Free the temporary command buffer
-    vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
-}
-
-uint32_t Application::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const {
-    VkPhysicalDeviceMemoryProperties memProperties{};
-    vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
-
-    for (uint32_t i = 0; i < memProperties.memoryTypeCount; ++i) {
-        // Check if the bit for this memory type is set AND if it has all required property flags
-        if ((typeFilter & (1 << i)) &&
-            (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-            return i;
-        }
-    }
-
-    throw std::runtime_error("Failed to find suitable memory type!");
-}
-
-void Application::createCommandBuffers() {
-    m_commandBuffers.resize(kMaxFramesInFlight);
-
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = m_commandPool;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = static_cast<uint32_t>(m_commandBuffers.size());
-
-    if (vkAllocateCommandBuffers(m_device, &allocInfo, m_commandBuffers.data()) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate command buffers!");
-    }
-}
-
-void Application::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) const {
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to begin recording command buffer!");
-    }
-
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass = m_renderPass;
-    renderPassInfo.framebuffer = m_swapChainFramebuffers[imageIndex];
-    renderPassInfo.renderArea.offset = { 0, 0 };
-    renderPassInfo.renderArea.extent = m_swapChainExtent;
-
-    // Clear colour attachment (0) to dark slate blue and depth attachment (1) to 1.0 (far plane)
-    std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = { { 0.08f, 0.10f, 0.14f, 1.0f } };
-    clearValues[1].depthStencil = { 1.0f, 0 };
-
-    renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    renderPassInfo.pClearValues = clearValues.data();
-
-    vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
-
-    // Set dynamic viewport and scissor to match current window size
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(m_swapChainExtent.width);
-    viewport.height = static_cast<float>(m_swapChainExtent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
-    scissor.extent = m_swapChainExtent;
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-
-    vkCmdBindDescriptorSets(
-        commandBuffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        m_pipelineLayout,
-        0,
-        1,
-        &m_descriptorSets[m_currentFrame],
-        0,
-        nullptr
-    );
-
-    // 1. Draw the tree trunk, branches, and ground plane (1 instance with scale = 0.0)
-    VkBuffer trunkBuffers[] = { m_vertexBuffer, m_trunkInstanceBuffer };
-    VkDeviceSize offsets[] = { 0, 0 };
-    vkCmdBindVertexBuffers(commandBuffer, 0, 2, trunkBuffers, offsets);
-    vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(commandBuffer, m_indexCount, 1, 0, 0, 0);
-
-    // Draw all individual leaves in a single hardware instanced draw call
-    if (m_leafInstanceCount > 0) {
-        VkBuffer leafBuffers[] = { m_leafVertexBuffer, m_leafInstanceBuffer };
-        vkCmdBindVertexBuffers(commandBuffer, 0, 2, leafBuffers, offsets);
-        vkCmdBindIndexBuffer(commandBuffer, m_leafIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(kLeafIndices.size()), m_leafInstanceCount, 0, 0, 0);
-    }
-
-    vkCmdEndRenderPass(commandBuffer);
-
-    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to record command buffer!");
-    }
-}
-
-void Application::createSyncObjects() {
-    m_imageAvailableSemaphores.resize(kMaxFramesInFlight);
-    m_renderFinishedSemaphores.resize(m_swapChainImages.size());
-    m_inFlightFences.resize(kMaxFramesInFlight);
-
-    VkSemaphoreCreateInfo semaphoreInfo{};
-    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    // Start fences in the signalled state so the very first frame doesn't wait forever
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-    for (size_t i = 0; i < kMaxFramesInFlight; ++i) {
-        if (vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]) != VK_SUCCESS ||
-            vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFences[i]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create frame synchronisation objects!");
-        }
-    }
-
-    for (size_t i = 0; i < m_swapChainImages.size(); ++i) {
-        if (vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_renderFinishedSemaphores[i]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create render-finished semaphores!");
-        }
     }
 }
 
@@ -1691,19 +1849,19 @@ void Application::mainLoop() {
 
         // Seasonal preset hotkeys (1 = Spring, 2 = Summer, 3 = Autumn, 4 = Winter)
         if (glfwGetKey(m_window, GLFW_KEY_1) == GLFW_PRESS) {
-            m_season = 0.5f; // Mid Spring
+            m_season = 0.25f;
             m_autoCycleSeasons = false;
         }
         if (glfwGetKey(m_window, GLFW_KEY_2) == GLFW_PRESS) {
-            m_season = 1.0f; // Peak Summer
+            m_season = 1.0f;
             m_autoCycleSeasons = false;
         }
         if (glfwGetKey(m_window, GLFW_KEY_3) == GLFW_PRESS) {
-            m_season = 2.15f; // Peak Autumn
+            m_season = 1.75f; // Mid-autumn so bough-by-bough green/yellow/orange contrast is clearly visible
             m_autoCycleSeasons = false;
         }
         if (glfwGetKey(m_window, GLFW_KEY_4) == GLFW_PRESS) {
-            m_season = 3.2f; // Bare Winter
+            m_season = 3.2f;
             m_autoCycleSeasons = false;
         }
 

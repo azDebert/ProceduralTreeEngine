@@ -21,17 +21,18 @@ struct Vertex {
     glm::vec3 pos;
     glm::vec3 color;
     glm::vec3 normal;
+    float flexibility = 0.0f; // >0 = branch wind flexibility, 0 = ground, -1 = wind compass arrow
 
     // Describes Binding 0 (per-vertex) and Binding 1 (per-instance LeafInstance)
     static std::array<VkVertexInputBindingDescription, 2> getBindingDescriptions() {
         std::array<VkVertexInputBindingDescription, 2> bindings{};
 
-        // Binding 0: advances once per vertex
+        // --- Binding 0: advances once per vertex ---
         bindings[0].binding = 0;
         bindings[0].stride = sizeof(Vertex);
         bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-        // Binding 1: advances once per drawn instance
+        // --- Binding 1: advances once per drawn instance ---
         bindings[1].binding = 1;
         bindings[1].stride = sizeof(LeafInstance);
         bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
@@ -39,29 +40,31 @@ struct Vertex {
         return bindings;
     }
 
-    // Describes how Vertex (locations 0..2) and LeafInstance (locations 3..9) map to the vertex shader
-    static std::array<VkVertexInputAttributeDescription, 10> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 10> attributes{};
+    // Maps Vertex (locations 0, 1, 2, 10) and LeafInstance (locations 3..9, 11) to the vertex shader
+    static std::array<VkVertexInputAttributeDescription, 12> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 12> attributes{};
 
         // --- Binding 0: Per-Vertex Attributes ---
-        attributes[0] = { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos) };
-        attributes[1] = { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color) };
-        attributes[2] = { 2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal) };
+        attributes[0] = { 0,  0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos) };
+        attributes[1] = { 1,  0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color) };
+        attributes[2] = { 2,  0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal) };
+        attributes[10] = { 10, 0, VK_FORMAT_R32_SFLOAT,       offsetof(Vertex, flexibility) };
 
         // --- Binding 1: Per-Instance Attributes (LeafInstance) ---
-        attributes[3] = { 3, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, position) };
-        attributes[4] = { 4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, direction) };
-        attributes[5] = { 5, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, normal) };
-        attributes[6] = { 6, 1, VK_FORMAT_R32_SFLOAT,       offsetof(LeafInstance, scale) };
-        attributes[7] = { 7, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, color) };
-        attributes[8] = { 8, 1, VK_FORMAT_R32_SFLOAT,       offsetof(LeafInstance, phase) };
-        attributes[9] = { 9, 1, VK_FORMAT_R32_SINT,         offsetof(LeafInstance, speciesType) };
+        attributes[3] = { 3,  1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, position) };
+        attributes[4] = { 4,  1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, direction) };
+        attributes[5] = { 5,  1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, normal) };
+        attributes[6] = { 6,  1, VK_FORMAT_R32_SFLOAT,       offsetof(LeafInstance, scale) };
+        attributes[7] = { 7,  1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LeafInstance, color) };
+        attributes[8] = { 8,  1, VK_FORMAT_R32_SFLOAT,       offsetof(LeafInstance, phase) };
+        attributes[9] = { 9,  1, VK_FORMAT_R32_SINT,         offsetof(LeafInstance, speciesType) };
+        attributes[11] = { 11, 1, VK_FORMAT_R32_SFLOAT,       offsetof(LeafInstance, flexibility) };
 
         return attributes;
     }
 };
 
-// 3D transformation matrices sent to the vertex shader uniform buffer
+// 3D transformation matrices and environmental uniforms sent to the vertex shader
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
@@ -70,6 +73,15 @@ struct UniformBufferObject {
     alignas(4) float time;
     alignas(4) float windStrength;
     alignas(8) glm::vec2 windDir;
+};
+
+// Sub-mesh index range and instance batch range for each species' 3D foliage mesh
+struct FoliageDrawBatch {
+    uint32_t firstIndex = 0;
+    uint32_t indexCount = 0;
+    int32_t vertexOffset = 0;
+    uint32_t firstInstance = 0;
+    uint32_t instanceCount = 0;
 };
 
 // Holds the queue family indices supported by GPU
@@ -218,6 +230,7 @@ private:
     VkBuffer m_leafInstanceBuffer = VK_NULL_HANDLE;
     VkDeviceMemory m_leafInstanceBufferMemory = VK_NULL_HANDLE;
     uint32_t m_leafInstanceCount = 0;
+    std::vector<FoliageDrawBatch> m_foliageBatches;
 
     std::vector<VkBuffer> m_uniformBuffers;
     std::vector<VkDeviceMemory> m_uniformBuffersMemory;
